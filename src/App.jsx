@@ -74,6 +74,7 @@ const DummyRecepcion = () => (
 );
 
 import MainLayout from './layouts/MainLayout';
+import Productos from './pages/Productos';
 import Proveedores from './pages/Proveedores';
 import OrdenesCompra from './pages/OrdenesCompra';
 
@@ -82,6 +83,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<PrivateRoute><MainLayout><DashboardAdquisiciones /></MainLayout></PrivateRoute>} />
+        <Route path="/productos" element={<PrivateRoute><MainLayout><Productos /></MainLayout></PrivateRoute>} />
         <Route path="/proveedores" element={<PrivateRoute><MainLayout><Proveedores /></MainLayout></PrivateRoute>} />
         <Route path="/ordenes" element={<PrivateRoute><MainLayout><OrdenesCompra /></MainLayout></PrivateRoute>} />
         <Route path="/recepcion" element={<PrivateRoute><MainLayout><DummyRecepcion /></MainLayout></PrivateRoute>} />

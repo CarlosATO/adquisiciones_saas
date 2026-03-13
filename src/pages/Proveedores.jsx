@@ -4,8 +4,8 @@ import { Plus, Edit, Copy, Building2, Phone, Mail, CreditCard, X, Landmark, MapP
 import CatalogoModal from '../components/CatalogoModal';
 
 const INITIAL_FORM_STATE = {
-  rut: '', name: '', fantasy_name: '', giro: '', address: '',
-  contact_person: '', phone: '', email: '', payment_terms: 'AL CONTADO',
+  rut: '', name: '', legal_name: '', fantasy_name: '', business_line: '', address: '',
+  contact_name: '', phone: '', email: '', payment_terms: 'CONTADO',
   bank_name: '', bank_account_type: '', bank_account_number: ''
 };
 
@@ -21,7 +21,8 @@ const formatRut = (value) => {
   return `${cuerpoFormateado}-${vd}`;
 };
 
-const BRAND_PRIMARY = '#4C3073';
+const BRAND_PRIMARY = '#4f46e5'; // Indigo-600
+const BRAND_HOVER = '#4338ca'; // Indigo-700
 export default function Proveedores() {
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -56,6 +57,7 @@ export default function Proveedores() {
       const { data: suppliersData, error } = await supabase
         .from('suppliers')
         .select('*')
+        .eq('company_id', companyUser.company_id)
         .order('name', { ascending: true });
 
       if (!error && suppliersData) setSuppliers(suppliersData);
@@ -85,9 +87,10 @@ export default function Proveedores() {
   const handleOpenEdit = (supplier) => {
     setEditingId(supplier.id);
     setFormData({
-      rut: supplier.rut || '', name: supplier.name || '', fantasy_name: supplier.fantasy_name || '',
-      giro: supplier.giro || '', address: supplier.address || '', contact_person: supplier.contact_person || '',
-      phone: supplier.phone || '', email: supplier.email || '', payment_terms: supplier.payment_terms || 'AL CONTADO',
+      rut: supplier.rut || '', name: supplier.name || '', legal_name: supplier.legal_name || '',
+      fantasy_name: supplier.fantasy_name || '', business_line: supplier.business_line || '',
+      address: supplier.address || '', contact_name: supplier.contact_name || '',
+      phone: supplier.phone || '', email: supplier.email || '', payment_terms: supplier.payment_terms || 'CONTADO',
       bank_name: supplier.bank_name || '', bank_account_type: supplier.bank_account_type || '', bank_account_number: supplier.bank_account_number || ''
     });
     setView('form');
@@ -99,7 +102,7 @@ export default function Proveedores() {
   };
 
   const handleCopy = (s) => {
-    const text = `PROVEEDOR: ${s.name}\nRUT: ${s.rut || 'N/A'}\nGIRO: ${s.giro || 'N/A'}\nDIRECCIÓN: ${s.address || 'N/A'}\nCONTACTO: ${s.contact_person || 'N/A'} (${s.phone || ''})\nEMAIL: ${s.email || 'N/A'}\nBANCO: ${s.bank_name || 'N/A'} / ${s.bank_account_type || ''} / CTA: ${s.bank_account_number || ''}`;
+    const text = `PROVEEDOR: ${s.name}\nRUT: ${s.rut || 'N/A'}\nGIRO: ${s.business_line || 'N/A'}\nDIRECCIÓN: ${s.address || 'N/A'}\nCONTACTO: ${s.contact_name || 'N/A'} (${s.phone || ''})\nEMAIL: ${s.email || 'N/A'}\nBANCO: ${s.bank_name || 'N/A'} / ${s.bank_account_type || ''} / CTA: ${s.bank_account_number || ''}`;
     navigator.clipboard.writeText(text);
     setCopiedId(s.id);
     setTimeout(() => setCopiedId(null), 2000);
@@ -142,112 +145,111 @@ export default function Proveedores() {
   });
 
   if (loading && view === 'list') {
-    return <div className="h-screen flex items-center justify-center bg-gray-50 text-gray-500 text-sm font-medium">Cargando proveedores...</div>;
+    return <div className="h-screen flex items-center justify-center bg-slate-50 text-slate-500 text-sm font-medium">Cargando proveedores...</div>;
   }
 
   // --- VISTA FORMULARIO ---
   if (view === 'form') {
     return (
-      <div className="flex flex-col h-screen bg-white font-sans text-gray-800 text-sm overflow-hidden absolute inset-0 z-[60]">
-        {/* Control Panel Superior */}
-        <div className="border-b border-gray-200 px-4 py-2 bg-white flex flex-col gap-2 shadow-sm shrink-0">
-          <div className="flex items-center text-sm text-gray-600">
-            <span className="hover:text-gray-900 cursor-pointer" onClick={() => setView('list')}>Proveedores</span>
-            <ChevronRight size={14} className="mx-1" />
-            <span className="font-semibold text-gray-800">{editingId ? 'Editar' : 'Nuevo'}</span>
-          </div>
-          <div className="flex justify-between items-center mt-1">
-            <div className="flex gap-2">
+      <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-800 text-sm overflow-hidden absolute inset-0 z-[60]">
+        {/* Control Panel Superior style Odoo */}
+        <div className="border-b border-slate-300 px-4 py-1.5 bg-white flex flex-col gap-1 shrink-0">
+          <nav className="flex items-center text-[11px] text-slate-500 uppercase tracking-wider font-medium">
+            <span className="hover:text-indigo-600 cursor-pointer" onClick={() => setView('list')}>Proveedores</span>
+            <ChevronRight size={12} className="mx-1" />
+            <span className="text-slate-900">{editingId ? formData.name : 'Nuevo'}</span>
+          </nav>
+          <div className="flex justify-between items-center">
+            <div className="flex gap-1">
               <button 
                 onClick={handleSubmit} 
                 disabled={saving} 
-                style={{ backgroundColor: BRAND_PRIMARY }}
-                className="hover:bg-brand-primary-dark text-white px-4 py-1.5 rounded-sm text-sm font-medium transition-colors disabled:opacity-50"
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-sm text-xs font-bold transition-colors disabled:opacity-50 uppercase shadow-sm"
               >
                 {saving ? 'Guardando...' : 'Guardar'}
               </button>
-              <button onClick={() => setView('list')} className="bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-1.5 rounded-sm text-sm font-medium transition-colors">
+              <button onClick={() => setView('list')} className="bg-white border border-slate-300 text-slate-600 hover:bg-slate-50 px-3 py-1 rounded-sm text-xs font-bold transition-colors uppercase shadow-sm">
                 Descartar
               </button>
             </div>
           </div>
         </div>
 
-        {/* CONTENIDO DEL FORMULARIO */}
-        <div className="flex-1 overflow-y-auto bg-gray-50 p-6">
-          <div className="max-w-5xl mx-auto bg-white border border-gray-200 shadow-sm rounded-sm overflow-hidden">
-            <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4">
-              <div className="space-y-4">
+        {/* CONTENIDO DEL FORMULARIO Odoo Style */}
+        <div className="flex-1 overflow-y-auto bg-slate-50 p-4">
+          <div className="max-w-6xl mx-auto bg-white border border-slate-300 shadow-sm rounded-sm">
+            <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-3">
+              <div className="space-y-3">
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">Razón Social *</label>
-                  <input name="name" required value={formData.name} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none" />
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">Nombre Comercial</label>
+                  <input name="name" required value={formData.name} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50/30" />
                 </div>
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">RUT *</label>
-                  <input name="rut" required value={formData.rut} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none font-mono" />
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">Razón Social</label>
+                  <input name="legal_name" value={formData.legal_name} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50/30" />
                 </div>
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">Nombre Fantasía</label>
-                  <input name="fantasy_name" value={formData.fantasy_name} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none" />
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">RUT</label>
+                  <input name="rut" required value={formData.rut} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none font-mono bg-slate-50/30" />
                 </div>
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">Giro</label>
-                  <input name="giro" value={formData.giro} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none" />
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">Giro / Actividad</label>
+                  <input name="business_line" value={formData.business_line} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50/30" />
                 </div>
               </div>
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">Condición Pago</label>
-                  <select name="payment_terms" value={formData.payment_terms} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none bg-white">
-                    <option value="AL CONTADO">AL CONTADO</option>
-                    <option value="15 DIAS">15 DÍAS</option>
-                    <option value="30 DIAS">30 DÍAS</option>
-                    <option value="45 DIAS">45 DÍAS</option>
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">Plazos Pago</label>
+                  <select name="payment_terms" value={formData.payment_terms} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50/30">
+                    <option value="CONTADO">CONTADO</option>
+                    <option value="CREDITO_15_DIAS">CRÉDITO 15D</option>
+                    <option value="CREDITO_30_DIAS">CRÉDITO 30D</option>
+                    <option value="CREDITO_45_DIAS">CRÉDITO 45D</option>
                     <option value="CONSIGNACION">CONSIGNACIÓN</option>
                   </select>
                 </div>
-                <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">Dirección</label>
-                  <input name="address" value={formData.address} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none" placeholder="CALLE, NUMERO, COMUNA" />
+                <div className="grid grid-cols-3 items-start">
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 pt-1 uppercase tracking-tighter">Dirección</label>
+                  <textarea name="address" value={formData.address} onChange={handleChange} rows={2} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50/30" placeholder="Calle, Número, Comuna..." />
                 </div>
               </div>
             </div>
 
-            <div className="px-8 border-b border-gray-200 bg-white">
-              <div className="inline-block border-b-2 border-brand-primary text-brand-primary px-4 py-2 font-medium text-sm">Contacto y Finanzas</div>
+            <div className="px-8 border-b border-slate-200 bg-slate-50/50">
+              <div className="inline-block border-b-2 border-indigo-600 text-indigo-700 px-4 py-2 font-bold text-xs uppercase tracking-widest">Información de Contacto</div>
             </div>
 
-            <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4">
-              <div className="space-y-4">
+            <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-3">
+              <div className="space-y-3">
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">Nombre Contacto</label>
-                  <input name="contact_person" value={formData.contact_person} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none" />
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">Contacto</label>
+                  <input name="contact_name" value={formData.contact_name} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50/30" />
                 </div>
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">Teléfono</label>
-                  <input name="phone" value={formData.phone} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none" />
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">Teléfono</label>
+                  <input name="phone" value={formData.phone} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none font-mono bg-slate-50/30" />
                 </div>
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">Email</label>
-                  <input name="email" type="email" value={formData.email} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none" />
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">Email</label>
+                  <input name="email" type="email" value={formData.email} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50/30" />
                 </div>
               </div>
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">Banco</label>
-                  <input name="bank_name" value={formData.bank_name} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none" />
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">Entidad Bancaria</label>
+                  <input name="bank_name" value={formData.bank_name} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50/30" />
                 </div>
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">Tipo Cuenta</label>
-                  <select name="bank_account_type" value={formData.bank_account_type} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none bg-white">
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">Tipo Cuenta</label>
+                  <select name="bank_account_type" value={formData.bank_account_type} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50/30">
                     <option value="">SELECCIONE...</option>
                     <option value="CUENTA CORRIENTE">CUENTA CORRIENTE</option>
                     <option value="CUENTA VISTA">CUENTA VISTA</option>
                   </select>
                 </div>
                 <div className="grid grid-cols-3 items-center">
-                  <label className="text-gray-600 font-medium text-right pr-4">N° Cuenta</label>
-                  <input name="bank_account_number" value={formData.bank_account_number} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-gray-300 border px-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none font-mono" />
+                  <label className="text-slate-500 font-bold text-xs text-right pr-4 uppercase tracking-tighter">N° de Cuenta</label>
+                  <input name="bank_account_number" value={formData.bank_account_number} onChange={handleChange} className="col-span-2 block w-full rounded-sm border-slate-300 border px-2 py-1 text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none font-mono bg-slate-50/30" />
                 </div>
               </div>
             </div>
@@ -258,65 +260,71 @@ export default function Proveedores() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-64px)] bg-white font-sans text-gray-800 text-sm overflow-hidden">
-      <div className="border-b border-gray-200 px-4 py-2 bg-white flex flex-col gap-2 shrink-0">
-        <div className="flex items-center text-sm text-gray-600">
-          <span className="hover:text-gray-900 cursor-pointer">Compras</span>
-          <ChevronRight size={14} className="mx-1" />
-          <span className="font-semibold text-gray-800">Proveedores</span>
-        </div>
-        <div className="flex justify-between items-center mt-1">
+    <div className="flex flex-col h-[calc(100vh-64px)] bg-slate-50 font-sans text-slate-800 text-sm overflow-hidden">
+      {/* Control Panel List View Odoo */}
+      <div className="border-b border-slate-300 px-4 py-1.5 bg-white flex flex-col gap-1 shrink-0">
+        <nav className="flex items-center text-[10px] text-slate-500 uppercase tracking-widest font-bold">
+          <span className="hover:text-indigo-600 cursor-pointer">Compras</span>
+          <ChevronRight size={10} className="mx-1" />
+          <span className="text-slate-900">Proveedores</span>
+        </nav>
+        <div className="flex justify-between items-center">
           <div className="flex gap-2">
             <button 
                onClick={handleOpenNew} 
-               style={{ backgroundColor: BRAND_PRIMARY }}
-               className="hover:bg-brand-primary-dark text-white px-4 py-1.5 rounded-sm text-sm font-medium transition-colors"
+               className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-sm text-xs font-bold transition-colors uppercase shadow-sm"
             >
                Nuevo
             </button>
           </div>
-          <div className="relative w-72">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input type="text" placeholder="Buscar por nombre o RUT..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="block w-full rounded-sm border-gray-300 border pl-8 pr-3 py-1.5 text-sm focus:border-brand-primary focus:ring-1 focus:ring-brand-primary outline-none" />
+          <div className="relative w-64">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input 
+              type="text" 
+              placeholder="Buscar proveedor..." 
+              value={searchTerm} 
+              onChange={(e) => setSearchTerm(e.target.value)} 
+              className="block w-full rounded-sm border-slate-300 border pl-8 pr-3 py-1 text-xs focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none bg-slate-50/50" 
+            />
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto bg-white p-4">
-        <div className="border border-gray-200 rounded-sm">
-          <table className="w-full text-left border-collapse">
-            <thead className="bg-gray-50 border-b border-gray-200">
+      <div className="flex-1 overflow-auto p-2">
+        <div className="border border-slate-300 bg-white">
+          <table className="w-full text-left border-collapse table-fixed">
+            <thead className="bg-slate-100 border-b border-slate-300 text-[10px] uppercase tracking-tighter text-slate-600 font-bold">
               <tr>
-                <th className="px-3 py-2 text-gray-600 font-medium">Razón Social / RUT</th>
-                <th className="px-3 py-2 text-gray-600 font-medium">Contacto Principal</th>
-                <th className="px-3 py-2 text-gray-600 font-medium">Datos Bancarios</th>
-                <th className="px-3 py-2 text-gray-600 font-medium text-center">Condición</th>
-                <th className="px-3 py-2 text-center w-28">Acciones</th>
+                <th className="px-2 py-1.5 w-1/3">Nombre / Razón Social</th>
+                <th className="px-2 py-1.5">Persona de Contacto</th>
+                <th className="px-2 py-1.5">Datos de Pago</th>
+                <th className="px-2 py-1.5 text-center w-24">Condición</th>
+                <th className="px-2 py-1.5 text-center w-24">Acciones</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200">
+            <tbody className="divide-y divide-slate-200">
               {filteredSuppliers.map((s) => (
-                <tr key={s.id} className="hover:bg-gray-50 transition-colors group cursor-pointer" onClick={() => handleOpenEdit(s)}>
-                  <td className="px-3 py-2">
-                    <div className="font-bold text-gray-800">{s.name}</div>
-                    <div className="text-xs text-gray-500">{formatRut(s.rut) || '-'}</div>
+                <tr key={s.id} className="hover:bg-indigo-50/30 transition-colors group cursor-pointer text-xs" onClick={() => handleOpenEdit(s)}>
+                  <td className="px-2 py-1.5 overflow-hidden text-ellipsis whitespace-nowrap">
+                    <div className="font-bold text-slate-900">{s.name}</div>
+                    <div className="text-[10px] text-slate-500 font-mono">{formatRut(s.rut) || '-'}</div>
                   </td>
-                  <td className="px-3 py-2">
-                    <div className="text-gray-700">{s.contact_person || '-'}</div>
-                    <div className="text-xs text-gray-500">{s.phone}</div>
+                  <td className="px-2 py-1.5 overflow-hidden text-ellipsis whitespace-nowrap">
+                    <div className="text-slate-700 font-medium">{s.contact_name || '-'}</div>
+                    <div className="text-[10px] text-slate-500">{s.phone}</div>
                   </td>
-                  <td className="px-3 py-2">
-                    <div className="text-gray-700">{s.bank_name || '-'}</div>
-                    <div className="text-xs text-gray-500">{s.bank_account_number}</div>
+                  <td className="px-2 py-1.5 overflow-hidden text-ellipsis whitespace-nowrap">
+                    <div className="text-slate-700">{s.bank_name || '-'}</div>
+                    <div className="text-[10px] text-slate-400 font-mono">{s.bank_account_number}</div>
                   </td>
-                  <td className="px-3 py-2 text-center">
-                    <span className="inline-flex px-2 py-0.5 rounded-sm bg-gray-100 text-gray-600 text-[10px] font-bold uppercase border border-gray-200">{s.payment_terms}</span>
+                  <td className="px-2 py-1.5 text-center">
+                    <span className="inline-flex px-1.5 py-0.5 rounded-sm bg-slate-100 text-slate-700 text-[9px] font-black uppercase border border-slate-300">{s.payment_terms}</span>
                   </td>
-                  <td className="px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center justify-center gap-2 transition-opacity">
-                      <button onClick={() => handleOpenCatalog(s)} className="text-brand-primary-light hover:text-brand-primary transition-colors" title="Catálogo"><Package size={16} /></button>
-                      <button onClick={() => handleCopy(s)} className="text-brand-primary-light hover:text-brand-primary transition-colors" title="Copiar">{copiedId === s.id ? <Check size={16} className="text-green-600" /> : <Copy size={16} />}</button>
-                      <button onClick={() => handleDelete(s.id)} className="text-gray-300 hover:text-brand-danger transition-colors" title="Eliminar"><Trash2 size={16} /></button>
+                  <td className="px-2 py-1.5 text-center" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-center gap-2">
+                      <button onClick={() => handleOpenCatalog(s)} className="text-slate-400 hover:text-indigo-600 transition-colors" title="Ver Catálogo"><Package size={14} /></button>
+                      <button onClick={() => handleCopy(s)} className="text-slate-400 hover:text-indigo-600 transition-colors" title="Copiar Datos">{copiedId === s.id ? <Check size={14} className="text-green-600" /> : <Copy size={14} />}</button>
+                      <button onClick={() => handleDelete(s.id)} className="text-slate-300 hover:text-red-600 transition-colors" title="Eliminar"><Trash2 size={14} /></button>
                     </div>
                   </td>
                 </tr>

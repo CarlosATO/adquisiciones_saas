@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { supabase } from '../api/supabaseClient';
 
 // Icons
@@ -12,7 +12,8 @@ import {
     LogOut,
     Grip,
     Bell,
-    HelpCircle
+    HelpCircle,
+    PackageCheck
 } from 'lucide-react';
 
 const BRAND_PRIMARY = '#4C3073';
@@ -39,9 +40,10 @@ const buildRibbonTabs = (userRole) => {
             label: 'Adquisiciones',
             icon: Truck,
             items: [
+                { to: '/productos', label: 'Productos', icon: Package },
                 { to: '/proveedores', label: 'Proveedores', icon: Users },
                 { to: '/ordenes', label: 'Órdenes de Compra', icon: ClipboardList },
-                { to: '/recepcion', label: 'Recepción', icon: Package },
+                { to: '/recepcion', label: 'Recepción', icon: PackageCheck },
             ],
         });
     }
@@ -131,31 +133,6 @@ export default function MainLayout({ children }) {
                 </div>
             </header>
 
-            {/* Odoo Module Menu */}
-            <nav className="flex h-10 shrink-0 items-center gap-1 bg-white border-b border-gray-200 px-4 text-[13px] shadow-sm overflow-x-auto no-scrollbar">
-                {currentTab?.items?.map((item) => {
-                    const isActive = item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to);
-                    return (
-                        <Link 
-                            key={item.to} 
-                            to={item.to}
-                            className="px-4 h-full flex items-center transition-all whitespace-nowrap border-b-2"
-                            style={isActive ? { 
-                                color: BRAND_PRIMARY, 
-                                fontWeight: '700', 
-                                borderBottomColor: BRAND_PRIMARY 
-                            } : { 
-                                color: '#6b7280', 
-                                fontWeight: '500', 
-                                borderBottomColor: 'transparent' 
-                            }}
-                        >
-                            {item.label}
-                        </Link>
-                    )
-                })}
-            </nav>
-
             {/* App Drawer Overlay */}
             {showAppDrawer && (
                 <div 
@@ -163,25 +140,25 @@ export default function MainLayout({ children }) {
                   className="fixed inset-0 top-10 z-[90] backdrop-blur-md animate-in fade-in duration-200"
                 >
                     <div className="p-12 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-8 max-w-6xl mx-auto">
-                        {tabs.map(tab => {
-                            const Icon = tab.icon;
+                        {tabs.flatMap(t => t.items).filter(item => item.to !== '/').map(item => {
+                            const Icon = item.icon;
+                            const isActive = item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to);
                             return (
                                 <button 
-                                    key={tab.id}
+                                    key={item.to}
                                     onClick={() => { 
-                                        navigate(tab.items[0].to);
-                                        setActiveTabId(tab.id);
+                                        navigate(item.to);
                                         setShowAppDrawer(false); 
                                     }}
                                     className="flex flex-col items-center gap-3 group transition-transform hover:scale-105"
                                 >
                                     <div 
-                                      className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all shadow-lg ${activeTabId === tab.id ? 'bg-white' : 'bg-white/10 text-white group-hover:bg-white/20'}`}
-                                      style={activeTabId === tab.id ? { color: BRAND_PRIMARY } : {}}
+                                      className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all shadow-lg ${isActive ? 'bg-white' : 'bg-white/10 text-white group-hover:bg-white/20'}`}
+                                      style={isActive ? { color: BRAND_PRIMARY } : {}}
                                     >
                                         <Icon size={32} />
                                     </div>
-                                    <span className="text-white font-medium text-sm tracking-wide">{tab.label}</span>
+                                    <span className="text-white font-medium text-sm tracking-wide">{item.label}</span>
                                 </button>
                             );
                         })}
