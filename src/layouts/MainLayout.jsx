@@ -1,73 +1,198 @@
-import React from 'react';
-import { NavLink } from 'react-router-dom';
-import { Grip, User, Settings } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
+import { supabase } from '../api/supabaseClient';
 
-const MainLayout = ({ children }) => {
-  const navigation = [
-    { name: 'Dashboard', href: '/' },
-    { name: 'Proveedores', href: '/proveedores' },
-    { name: 'Órdenes de Compra', href: '/ordenes' },
-    { name: 'Recepción', href: '/recepcion' },
-  ];
+// Icons
+import {
+    LayoutDashboard,
+    Package,
+    Users,
+    Truck,
+    ClipboardList,
+    LogOut,
+    Grip,
+    Bell,
+    HelpCircle
+} from 'lucide-react';
 
-  return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-50 font-sans text-slate-800">
-      
-      {/* Top Bar (Global Shell) */}
-      <header className="flex h-14 shrink-0 items-center justify-between bg-slate-900 px-4 text-white">
-        {/* Lado Izquierdo */}
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => window.location.href = 'http://localhost:3000/portal'}
-            className="flex h-8 w-8 items-center justify-center rounded-md text-slate-300 hover:bg-slate-800 hover:text-white transition-colors cursor-pointer"
-            title="Volver al Portal"
-          >
-            <Grip className="h-5 w-5" />
-          </button>
-          <div className="h-4 w-px bg-slate-700"></div>
-          <span className="text-sm font-semibold tracking-wide">
-            Datix <span className="font-light opacity-70">| Adquisiciones</span>
-          </span>
-        </div>
+const BRAND_PRIMARY = '#4C3073';
 
-        {/* Lado Derecho */}
-        <div className="flex items-center gap-3">
-            <button className="flex h-8 w-8 items-center justify-center rounded-full text-slate-300 hover:bg-slate-800 hover:text-white transition-colors">
-                <Settings className="h-4 w-4" />
-            </button>
-            <button className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition-colors ring-1 ring-slate-700">
-                <User className="h-4 w-4" />
-            </button>
-        </div>
-      </header>
+const buildRibbonTabs = (userRole) => {
+    const tabs = [];
+    
+    // Module 1: Inicio / Dashboard
+    if (['OWNER', 'MANAGER'].includes(userRole)) {
+        tabs.push({
+            id: 'inicio',
+            label: 'Inicio',
+            icon: LayoutDashboard,
+            items: [
+                { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+            ],
+        });
+    }
 
-      {/* Sub-Nav Bar (Menú del Módulo) */}
-      <nav className="flex h-12 shrink-0 items-center gap-6 border-b border-slate-200 bg-white px-6 text-sm font-medium">
-        {navigation.map((item) => (
-          <NavLink
-            key={item.name}
-            to={item.href}
-            end={item.href === '/'} // Para que '/' no coincida con '/proveedores'
-            className={({ isActive }) =>
-              `flex h-full items-center border-b-2 transition-colors ${
-                isActive
-                  ? 'border-indigo-600 text-indigo-600'
-                  : 'border-transparent text-slate-500 hover:text-indigo-600'
-              }`
-            }
-          >
-            {item.name}
-          </NavLink>
-        ))}
-      </nav>
+    // Module 2: Adquisiciones (Local)
+    if (['OWNER', 'MANAGER', 'PURCHASER'].includes(userRole)) {
+        tabs.push({
+            id: 'adquisiciones',
+            label: 'Adquisiciones',
+            icon: Truck,
+            items: [
+                { to: '/proveedores', label: 'Proveedores', icon: Users },
+                { to: '/ordenes', label: 'Órdenes de Compra', icon: ClipboardList },
+                { to: '/recepcion', label: 'Recepción', icon: Package },
+            ],
+        });
+    }
 
-      {/* Área de Contenido */}
-      <main className="flex-1 overflow-auto bg-slate-50 p-6">
-        {children}
-      </main>
-      
-    </div>
-  );
+    return tabs;
 };
 
-export default MainLayout;
+export default function MainLayout({ children }) {
+    const navigate = useNavigate();
+    const location = useLocation();
+    const [userRole, setUserRole] = useState(null);
+    const [userName, setUserName] = useState('');
+    const [companyName, setCompanyName] = useState('Datix ERP');
+    const [loading, setLoading] = useState(true);
+    const [activeTabId, setActiveTabId] = useState(null);
+    const [showAppDrawer, setShowAppDrawer] = useState(false);
+
+    useEffect(() => { fetchUserData(); }, []);
+
+    useEffect(() => {
+        if (!userRole) return;
+        const tabs = buildRibbonTabs(userRole);
+        const found = tabs.find(t => t.items?.some(i => i.to === location.pathname)) || 
+                      tabs.find(t => t.items?.some(i => i.to !== '/' && location.pathname.startsWith(i.to)));
+        if (found) setActiveTabId(found.id);
+        else setActiveTabId('adquisiciones');
+    }, [location.pathname, userRole]);
+
+    const fetchUserData = async () => {
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            setUserName(user.email.split('@')[0].toUpperCase());
+            const { data, error } = await supabase.from('company_users').select('role, companies(name)').eq('user_id', user.id).single();
+            if (error) throw error;
+            setUserRole(data.role);
+            setCompanyName(data.companies.name.replace(/Almacen/i, "Adquisiciones"));
+        } catch (err) { console.error(err); } finally { setLoading(false); }
+    };
+
+    if (loading) return <div className="h-screen bg-gray-50 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary"></div></div>;
+
+    const tabs = buildRibbonTabs(userRole);
+    const currentTab = tabs.find(t => t.id === activeTabId) || tabs.find(t => t.id === 'adquisiciones');
+
+    return (
+        <div className="flex flex-col h-screen bg-white font-sans text-gray-800 text-sm overflow-hidden">
+            
+            {/* Top Bar with Inline Hex Fallback */}
+            <header 
+              style={{ backgroundColor: BRAND_PRIMARY }}
+              className="flex h-10 shrink-0 items-center justify-between px-4 text-white z-[100] shadow-md"
+            >
+                <div className="flex items-center gap-2">
+                    <button 
+                        onClick={() => setShowAppDrawer(!showAppDrawer)}
+                        className={`flex h-8 w-8 items-center justify-center rounded-sm hover:bg-white/10 transition-colors ${showAppDrawer ? 'bg-white/20' : ''}`}
+                    >
+                        <Grip size={18} />
+                    </button>
+                    <div className="h-4 w-px bg-white/20 mx-1"></div>
+                    <span className="font-bold tracking-tight uppercase text-[12px]">{currentTab?.label || 'Adquisiciones'}</span>
+                </div>
+
+                <div className="flex items-center gap-4">
+                    <div className="hidden md:flex items-center gap-4 text-white/80">
+                        <button className="hover:text-white"><Bell size={16} /></button>
+                        <button className="hover:text-white"><HelpCircle size={16} /></button>
+                    </div>
+                    <div className="flex items-center gap-2 ml-2 cursor-pointer hover:bg-white/10 px-2 py-1 rounded-sm transition-colors group relative">
+                        <span className="text-[11px] font-medium hidden sm:block">{userName}</span>
+                        <div className="h-6 w-6 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold border border-white/30">
+                            {userName.substring(0, 2)}
+                        </div>
+                        <div className="absolute right-0 top-full w-48 pt-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity z-[110]">
+                            <div className="bg-white text-gray-800 shadow-xl border border-gray-200 rounded-sm py-1">
+                            <div className="px-4 py-2 border-b border-gray-100">
+                                <p className="font-bold text-xs">{companyName}</p>
+                                <p className="text-[10px] text-gray-400 capitalize">{userRole?.toLowerCase()}</p>
+                            </div>
+                            <button onClick={() => window.location.href = 'http://localhost:3000/portal'} className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center gap-2 text-xs">
+                                <LogOut size={14} /> Volver al Portal
+                            </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            {/* Odoo Module Menu */}
+            <nav className="flex h-10 shrink-0 items-center gap-1 bg-white border-b border-gray-200 px-4 text-[13px] shadow-sm overflow-x-auto no-scrollbar">
+                {currentTab?.items?.map((item) => {
+                    const isActive = item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to);
+                    return (
+                        <Link 
+                            key={item.to} 
+                            to={item.to}
+                            className="px-4 h-full flex items-center transition-all whitespace-nowrap border-b-2"
+                            style={isActive ? { 
+                                color: BRAND_PRIMARY, 
+                                fontWeight: '700', 
+                                borderBottomColor: BRAND_PRIMARY 
+                            } : { 
+                                color: '#6b7280', 
+                                fontWeight: '500', 
+                                borderBottomColor: 'transparent' 
+                            }}
+                        >
+                            {item.label}
+                        </Link>
+                    )
+                })}
+            </nav>
+
+            {/* App Drawer Overlay */}
+            {showAppDrawer && (
+                <div 
+                  style={{ backgroundColor: `${BRAND_PRIMARY}f2` }}
+                  className="fixed inset-0 top-10 z-[90] backdrop-blur-md animate-in fade-in duration-200"
+                >
+                    <div className="p-12 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-8 max-w-6xl mx-auto">
+                        {tabs.map(tab => {
+                            const Icon = tab.icon;
+                            return (
+                                <button 
+                                    key={tab.id}
+                                    onClick={() => { 
+                                        navigate(tab.items[0].to);
+                                        setActiveTabId(tab.id);
+                                        setShowAppDrawer(false); 
+                                    }}
+                                    className="flex flex-col items-center gap-3 group transition-transform hover:scale-105"
+                                >
+                                    <div 
+                                      className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all shadow-lg ${activeTabId === tab.id ? 'bg-white' : 'bg-white/10 text-white group-hover:bg-white/20'}`}
+                                      style={activeTabId === tab.id ? { color: BRAND_PRIMARY } : {}}
+                                    >
+                                        <Icon size={32} />
+                                    </div>
+                                    <span className="text-white font-medium text-sm tracking-wide">{tab.label}</span>
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {/* Main Content Area */}
+            <main className="flex-1 overflow-hidden relative bg-white">
+                {children || <Outlet />}
+            </main>
+        </div>
+    );
+}
