@@ -554,7 +554,7 @@ export default function OrdenesCompra() {
           .insert([{
             company_id: companyId,
             user_id: user.id,
-            category: 'NOTA_CREDITO',
+            category: 'OTROS',
             amount: -returnedTotal,
             description: `${returnData.document_type} ${returnData.document_number} - Dev. OC #${selectedOrder.po_number} - ${selectedOrder.suppliers?.business_name || selectedOrder.suppliers?.name}`,
             expense_date: new Date().toISOString().split('T')[0],
@@ -564,7 +564,7 @@ export default function OrdenesCompra() {
             document_number: returnData.document_number,
             status: 'PENDING_PAYMENT',
           }]);
-        if (expErr) console.warn('No se pudo registrar nota de crédito en expenses:', expErr.message);
+        if (expErr) throw new Error('No se pudo registrar nota de crédito: ' + expErr.message);
       }
 
       alert("Devolución procesada correctamente.");

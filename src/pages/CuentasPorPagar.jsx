@@ -99,12 +99,20 @@ export default function CuentasPorPagar() {
 
         // Enriquecer cada expense con su tipo de documento y pagos
         const docs = poExpenses.map(exp => {
+          const isCredit   = Number(exp.amount) < 0;
           const receipt    = poReceipts.find(r => r.document_number === exp.document_number);
           const expPayments= (payments || []).filter(p => p.expense_id === exp.id);
           const paidReal   = expPayments.reduce((s, p) => s + Number(p.amount), 0);
+          let docType;
+          if (isCredit) {
+            // Detectar tipo desde la descripción (GUIA_DEVOLUCION o NOTA_CREDITO)
+            docType = (exp.description || '').includes('GUIA_DEVOLUCION') ? 'GUIA_DEVOLUCION' : 'NOTA_CREDITO';
+          } else {
+            docType = receipt?.document_type || 'FACTURA';
+          }
           return {
             ...exp,
-            document_type: exp.category === 'NOTA_CREDITO' ? 'NOTA_CREDITO' : (receipt?.document_type || 'FACTURA'),
+            document_type: docType,
             paid_amount:   paidReal || Number(exp.paid_amount || 0),
           };
         });
