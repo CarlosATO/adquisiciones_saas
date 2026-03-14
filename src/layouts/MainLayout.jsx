@@ -30,7 +30,7 @@ const buildRibbonTabs = (userRole) => {
             label: 'Inicio',
             icon: LayoutDashboard,
             items: [
-                { to: '/', label: 'Dashboard', icon: LayoutDashboard, exact: true },
+                { to: '/dashboard-compras', label: 'Tablero', icon: LayoutDashboard },
             ],
         });
     }
@@ -171,7 +171,7 @@ export default function MainLayout({ children }) {
             )}
 
             {/* Main Content Area */}
-            <main className="flex-1 overflow-hidden relative bg-white">
+            <main className="flex-1 overflow-auto relative bg-white">
                 {children || <Outlet />}
             </main>
         </div>

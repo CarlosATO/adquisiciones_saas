@@ -73,12 +73,14 @@ import Proveedores from './pages/Proveedores';
 import OrdenesCompra from './pages/OrdenesCompra';
 import Facturacion from './pages/Facturacion';
 import CuentasPorPagar from './pages/CuentasPorPagar';
+import AdquisicionesDashboard from './pages/AdquisicionesDashboard';
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<PrivateRoute><MainLayout><DashboardAdquisiciones /></MainLayout></PrivateRoute>} />
+        <Route path="/" element={<PrivateRoute><MainLayout><AdquisicionesDashboard /></MainLayout></PrivateRoute>} />
+        <Route path="/dashboard-compras" element={<PrivateRoute><MainLayout><AdquisicionesDashboard /></MainLayout></PrivateRoute>} />
         <Route path="/productos" element={<PrivateRoute><MainLayout><Productos /></MainLayout></PrivateRoute>} />
         <Route path="/proveedores" element={<PrivateRoute><MainLayout><Proveedores /></MainLayout></PrivateRoute>} />
         <Route path="/ordenes" element={<PrivateRoute><MainLayout><OrdenesCompra /></MainLayout></PrivateRoute>} />

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../api/supabaseClient';
-import { Plus, ShoppingCart, Trash2, ArrowLeft, CheckCircle, Clock, FileEdit, Search, ChevronRight, History, Download, Mail, Truck, X, RotateCcw } from 'lucide-react';
+import { Plus, ShoppingCart, Trash2, ArrowLeft, CheckCircle, Clock, FileEdit, Search, ChevronRight, History, Download, Mail, Truck, X, RotateCcw, FileText } from 'lucide-react';
 import SearchableSelect from '../components/ui/SearchableSelect';
 import { PDFDownloadLink, pdf } from '@react-pdf/renderer';
 import PurchaseOrderPDF from '../components/PurchaseOrderPDF';
@@ -51,6 +51,11 @@ export default function OrdenesCompra() {
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [returnData, setReturnData] = useState({ document_type: 'NOTA_CREDITO', document_number: '', notes: '' });
   const [returningLines, setReturningLines] = useState([]);
+
+  // Estados para Asociar Factura
+  const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [invoiceFormData, setInvoiceFormData] = useState({ invoice_number: '', issue_date: new Date().toISOString().split('T')[0], due_date: '' });
+  const [invoiceSelectedReceipt, setInvoiceSelectedReceipt] = useState(null);
 
   useEffect(() => {
     fetchInitialData();
@@ -278,7 +283,7 @@ export default function OrdenesCompra() {
       // 4. Expenses vinculadas (facturas + notas de crédito)
       const { data: expensesData } = await supabase
         .from('expenses')
-        .select('id, category, document_number, amount, expense_date, status, description')
+        .select('id, category, document_number, amount, expense_date, status, description, receipt_id')
         .eq('po_id', orderId)
         .order('expense_date', { ascending: true });
       setOrderExpenses(expensesData || []);
@@ -288,7 +293,7 @@ export default function OrdenesCompra() {
         const receiptIds = receiptsData.map(r => r.id);
         const { data: movementsData } = await supabase
           .from('inventory_movements')
-          .select('id, movement_type, quantity, reason, created_at, products(name)')
+          .select('id, movement_type, quantity, reason, created_at, receipt_id, product_id, products(name)')
           .in('receipt_id', receiptIds)
           .order('created_at', { ascending: false });
         setOrderMovements(movementsData || []);
@@ -613,6 +618,64 @@ export default function OrdenesCompra() {
     }
   };
 
+  // ── Calcular monto de una recepción (movimientos IN × costo unitario × 1.19) ──
+  const calcReceiptAmount = (receipt) => {
+    const movs = orderMovements.filter(m => m.receipt_id === receipt.id && m.movement_type === 'IN');
+    const subtotal = movs.reduce((sum, m) => {
+      const line = orderLines.find(l => l.product_id === m.product_id);
+      return sum + (Number(m.quantity) * Number(line?.unit_cost || 0));
+    }, 0);
+    return Math.round(subtotal * 1.19);
+  };
+
+  const handleOpenInvoiceModal = () => {
+    const uninvoiced = orderReceipts.filter(r =>
+      r.document_type !== 'FACTURA' &&
+      !orderExpenses.some(e => e.receipt_id === r.id && Number(e.amount) > 0)
+    );
+    setInvoiceSelectedReceipt(uninvoiced.length === 1 ? uninvoiced[0] : null);
+    setInvoiceFormData({ invoice_number: '', issue_date: new Date().toISOString().split('T')[0], due_date: '' });
+    setShowInvoiceModal(true);
+  };
+
+  const handleRegisterInvoice = async () => {
+    if (!invoiceFormData.invoice_number) return alert('Ingrese el número de factura.');
+    if (!invoiceSelectedReceipt) return alert('Seleccione la recepción a facturar.');
+    setSaving(true);
+    try {
+      const amount = calcReceiptAmount(invoiceSelectedReceipt);
+      const { error: expErr } = await supabase.from('expenses').insert([{
+        company_id:      companyId,
+        user_id:         userId,
+        category:        'OTROS',
+        amount:          amount,
+        description:     `FACTURA ${invoiceFormData.invoice_number} — ${invoiceSelectedReceipt.document_type === 'GUIA_DESPACHO' ? 'Guía de Despacho' : invoiceSelectedReceipt.document_type} ${invoiceSelectedReceipt.document_number}`,
+        expense_date:    invoiceFormData.issue_date,
+        po_id:           selectedOrder.id,
+        receipt_id:      invoiceSelectedReceipt.id,
+        supplier_id:     selectedOrder.supplier_id,
+        document_number: invoiceFormData.invoice_number,
+        due_date:        invoiceFormData.due_date || null,
+        status:          'PENDING_PAYMENT',
+      }]);
+      if (expErr) throw expErr;
+
+      await supabase.from('purchase_orders')
+        .update({ billing_status: 'BILLED' })
+        .eq('id', selectedOrder.id);
+
+      setShowInvoiceModal(false);
+      await fetchOrderDetails(selectedOrder.id);
+      await fetchInitialData();
+      alert('Factura registrada correctamente.');
+    } catch (err) {
+      console.error(err);
+      alert('Error al registrar factura: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSaveOrder = async (orderStatus) => {
     if (!selectedSupplier) return alert("Selecciona un proveedor.");
     const validLines = lines.filter(l => l.product_id && l.quantity > 0);
@@ -897,6 +960,18 @@ export default function OrdenesCompra() {
                                 <RotateCcw size={14} /> Devolver Productos
                             </button>
                         )}
+                        {(selectedOrder.status === 'PARTIAL' || selectedOrder.status === 'RECEIVED') &&
+                          orderReceipts.some(r =>
+                            r.document_type !== 'FACTURA' &&
+                            !orderExpenses.some(e => e.receipt_id === r.id && Number(e.amount) > 0)
+                          ) && (
+                            <button
+                                onClick={handleOpenInvoiceModal}
+                                className="text-green-700 border border-green-200 bg-green-50 hover:bg-green-100 px-4 py-1.5 rounded-sm text-xs font-bold transition-colors uppercase shadow-sm flex items-center gap-2"
+                            >
+                                <FileText size={14} /> Asociar Factura
+                            </button>
+                        )}
                         {selectedOrder.status === 'PARTIAL' && (
                             <button
                                 onClick={handleForceCloseOrder}
@@ -1000,6 +1075,63 @@ export default function OrdenesCompra() {
                     </div>
                 </div>
 
+                {/* ============ DOCUMENTOS ASOCIADOS (en encabezado) ============ */}
+                {selectedOrder.status !== 'DRAFT' && (orderReceipts.length > 0 || orderExpenses.length > 0) && (
+                  <div className="mb-10 border border-slate-200 rounded-sm overflow-hidden">
+                    <div className="bg-slate-50 border-b border-slate-200 px-4 py-2">
+                      <span className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Documentos Asociados</span>
+                    </div>
+                    <table className="w-full text-xs border-collapse">
+                      <thead className="border-b border-slate-100 text-[10px] uppercase tracking-tighter text-slate-400 font-bold">
+                        <tr>
+                          <th className="px-4 py-2 text-left w-36">Tipo</th>
+                          <th className="px-4 py-2 text-left w-36">N° Documento</th>
+                          <th className="px-4 py-2 text-left w-28">Fecha</th>
+                          <th className="px-4 py-2 text-right w-36">Monto</th>
+                          <th className="px-4 py-2 text-left">Descripción</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-50">
+                        {orderReceipts.map(r => (
+                          <tr key={`r-${r.id}`} className="hover:bg-slate-50/50">
+                            <td className="px-4 py-2">
+                              <span className={`inline-flex px-1.5 py-0.5 rounded-sm text-[9px] font-black border uppercase ${
+                                r.document_type === 'FACTURA' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-purple-50 text-purple-700 border-purple-200'
+                              }`}>
+                                {r.document_type === 'FACTURA' ? 'Factura' : r.document_type === 'GUIA_DESPACHO' ? 'Guía Despacho' : r.document_type}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2 font-mono font-bold text-indigo-700">{r.document_number || '—'}</td>
+                            <td className="px-4 py-2 font-mono text-slate-500">{r.created_at?.split('T')[0]}</td>
+                            <td className="px-4 py-2 text-right text-slate-300 font-mono">—</td>
+                            <td className="px-4 py-2 text-slate-400 italic">{r.notes || ''}</td>
+                          </tr>
+                        ))}
+                        {orderExpenses.map(e => {
+                          const isCredit = Number(e.amount) < 0;
+                          return (
+                            <tr key={`e-${e.id}`} className={isCredit ? 'bg-red-50/20' : ''}>
+                              <td className="px-4 py-2">
+                                <span className={`inline-flex px-1.5 py-0.5 rounded-sm text-[9px] font-black border uppercase ${
+                                  isCredit ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'
+                                }`}>
+                                  {isCredit ? ((e.description || '').includes('GUIA_DEVOLUCION') ? 'Guía Dev.' : 'Nota Crédito') : 'Factura Registrada'}
+                                </span>
+                              </td>
+                              <td className={`px-4 py-2 font-mono font-bold ${isCredit ? 'text-red-600' : 'text-indigo-700'}`}>{e.document_number || '—'}</td>
+                              <td className="px-4 py-2 font-mono text-slate-500">{e.expense_date}</td>
+                              <td className={`px-4 py-2 text-right font-mono font-bold ${isCredit ? 'text-red-600' : 'text-green-700'}`}>
+                                {isCredit ? `-$${Math.round(Math.abs(Number(e.amount))).toLocaleString('es-CL')}` : `$${Math.round(Number(e.amount)).toLocaleString('es-CL')}`}
+                              </td>
+                              <td className="px-4 py-2 text-slate-400 italic text-[10px]">{e.description || ''}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
                 <div className="mb-10">
                     <table className="w-full text-left text-xs border-collapse">
                         <thead className="bg-slate-100 border-y border-slate-200 text-[10px] font-black uppercase tracking-widest text-slate-500">
@@ -1064,67 +1196,6 @@ export default function OrdenesCompra() {
                             })()}
                         </div>
                     </div>
-                )}
-
-                {/* ============ SECCIÓN: DOCUMENTOS ASOCIADOS ============ */}
-                {selectedOrder.status !== 'DRAFT' && (orderReceipts.length > 0 || orderExpenses.length > 0) && (
-                  <div className="mt-10 pt-8 border-t border-slate-200">
-                    <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Documentos Asociados</h3>
-                    <div className="border border-slate-200 rounded-sm overflow-hidden">
-                      <table className="w-full text-xs border-collapse">
-                        <thead className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase tracking-tighter text-slate-500 font-bold">
-                          <tr>
-                            <th className="px-4 py-2 text-left">Tipo</th>
-                            <th className="px-4 py-2 text-left">N° Documento</th>
-                            <th className="px-4 py-2 text-left">Fecha</th>
-                            <th className="px-4 py-2 text-right">Monto</th>
-                            <th className="px-4 py-2 text-left">Notas</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {/* Recepciones (Guías / Facturas registradas en inventory_receipts) */}
-                          {orderReceipts.map(r => (
-                            <tr key={r.id} className="hover:bg-slate-50/50">
-                              <td className="px-4 py-2">
-                                <span className={`inline-flex px-1.5 py-0.5 rounded-sm text-[9px] font-black border uppercase ${
-                                  r.document_type === 'FACTURA' ? 'bg-blue-50 text-blue-700 border-blue-200' :
-                                  r.document_type === 'GUIA_DESPACHO' ? 'bg-purple-50 text-purple-700 border-purple-200' :
-                                  'bg-slate-50 text-slate-600 border-slate-200'
-                                }`}>
-                                  {r.document_type === 'GUIA_DESPACHO' ? 'Guía Despacho' : r.document_type === 'FACTURA' ? 'Factura' : r.document_type}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2 font-mono font-bold text-indigo-700">{r.document_number || '—'}</td>
-                              <td className="px-4 py-2 font-mono text-slate-500 text-[10px]">{r.created_at?.split('T')[0]}</td>
-                              <td className="px-4 py-2 text-right text-slate-400 font-mono">—</td>
-                              <td className="px-4 py-2 text-slate-400 text-[10px] italic">{r.notes || ''}</td>
-                            </tr>
-                          ))}
-                          {/* Facturas/NC en expenses */}
-                          {orderExpenses.map(e => {
-                            const isCredit = Number(e.amount) < 0;
-                            return (
-                              <tr key={e.id} className={isCredit ? 'bg-red-50/30 hover:bg-red-50/50' : 'hover:bg-slate-50/50'}>
-                                <td className="px-4 py-2">
-                                  <span className={`inline-flex px-1.5 py-0.5 rounded-sm text-[9px] font-black border uppercase ${
-                                    isCredit ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'
-                                  }`}>
-                                    {isCredit ? ((e.description || '').includes('GUIA_DEVOLUCION') ? 'Guía Devolución' : 'Nota Crédito') : 'Factura Registrada'}
-                                  </span>
-                                </td>
-                                <td className={`px-4 py-2 font-mono font-bold ${isCredit ? 'text-red-600' : 'text-indigo-700'}`}>{e.document_number || '—'}</td>
-                                <td className="px-4 py-2 font-mono text-slate-500 text-[10px]">{e.expense_date}</td>
-                                <td className={`px-4 py-2 text-right font-mono font-bold ${isCredit ? 'text-red-600' : 'text-slate-700'}`}>
-                                  {isCredit ? `-$${Math.round(Math.abs(Number(e.amount))).toLocaleString('es-CL')}` : `$${Math.round(Number(e.amount)).toLocaleString('es-CL')}`}
-                                </td>
-                                <td className="px-4 py-2 text-slate-400 text-[10px] italic">{e.description || ''}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
                 )}
 
                 {/* ============ SECCIÓN: HISTORIAL DE MOVIMIENTOS ============ */}
@@ -1461,6 +1532,106 @@ export default function OrdenesCompra() {
             </div>
           </div>
         )}
+
+        {/* ============ MODAL: ASOCIAR FACTURA ============ */}
+        {showInvoiceModal && (() => {
+          const uninvoiced = orderReceipts.filter(r =>
+            r.document_type !== 'FACTURA' &&
+            !orderExpenses.some(e => e.receipt_id === r.id && Number(e.amount) > 0)
+          );
+          const receipt = invoiceSelectedReceipt;
+          const amount = receipt ? calcReceiptAmount(receipt) : 0;
+          return (
+            <div className="fixed inset-0 bg-black/40 z-[200] flex items-center justify-center">
+              <div className="bg-white rounded-sm shadow-2xl w-full max-w-lg border border-slate-200">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-green-50">
+                  <div className="flex items-center gap-2">
+                    <FileText size={16} className="text-green-700" />
+                    <h2 className="text-sm font-black uppercase tracking-wider text-green-800">Asociar Factura de Proveedor</h2>
+                  </div>
+                  <button onClick={() => setShowInvoiceModal(false)} className="text-slate-400 hover:text-slate-600">
+                    <X size={18} />
+                  </button>
+                </div>
+                {/* Body */}
+                <div className="px-6 py-5 space-y-4">
+                  {/* Selección de recepción */}
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Recepción a Facturar</label>
+                    <select
+                      value={invoiceSelectedReceipt?.id || ''}
+                      onChange={(e) => setInvoiceSelectedReceipt(uninvoiced.find(r => r.id === e.target.value) || null)}
+                      className="w-full border border-slate-200 rounded-sm px-3 py-2 text-sm bg-white focus:border-green-400 outline-none"
+                    >
+                      <option value="">— Seleccionar recepción —</option>
+                      {uninvoiced.map(r => (
+                        <option key={r.id} value={r.id}>
+                          {r.document_type === 'GUIA_DESPACHO' ? 'Guía Despacho' : r.document_type} #{r.document_number} — {r.created_at?.split('T')[0]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {/* Monto calculado */}
+                  {receipt && (
+                    <div className="bg-green-50 border border-green-200 rounded-sm px-4 py-2 flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase text-green-700 tracking-widest">Monto Factura (c/IVA)</span>
+                      <span className="font-mono font-black text-green-800 text-base">${amount.toLocaleString('es-CL')}</span>
+                    </div>
+                  )}
+                  {/* N° Factura */}
+                  <div>
+                    <label className="block text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">N° Factura *</label>
+                    <input
+                      type="text"
+                      placeholder="Ej: 001-2024"
+                      value={invoiceFormData.invoice_number}
+                      onChange={(e) => setInvoiceFormData({ ...invoiceFormData, invoice_number: e.target.value.toUpperCase() })}
+                      className="w-full border border-slate-200 rounded-sm px-3 py-2 text-sm focus:border-green-400 outline-none font-mono"
+                    />
+                  </div>
+                  {/* Fechas */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Fecha Emisión *</label>
+                      <input
+                        type="date"
+                        value={invoiceFormData.issue_date}
+                        onChange={(e) => setInvoiceFormData({ ...invoiceFormData, issue_date: e.target.value })}
+                        className="w-full border border-slate-200 rounded-sm px-3 py-2 text-sm focus:border-green-400 outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase text-slate-500 tracking-widest mb-1">Fecha Vencimiento</label>
+                      <input
+                        type="date"
+                        value={invoiceFormData.due_date}
+                        onChange={(e) => setInvoiceFormData({ ...invoiceFormData, due_date: e.target.value })}
+                        className="w-full border border-slate-200 rounded-sm px-3 py-2 text-sm focus:border-green-400 outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+                {/* Footer */}
+                <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-200 bg-slate-50">
+                  <button
+                    onClick={() => setShowInvoiceModal(false)}
+                    className="px-4 py-1.5 text-xs font-bold uppercase border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-sm"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleRegisterInvoice}
+                    disabled={saving || !invoiceSelectedReceipt || !invoiceFormData.invoice_number}
+                    className="px-4 py-1.5 text-xs font-bold uppercase bg-green-600 hover:bg-green-700 text-white rounded-sm disabled:opacity-50 flex items-center gap-2"
+                  >
+                    <FileText size={13} /> {saving ? 'Guardando...' : 'Vincular Factura'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
           </div>
         </div>
