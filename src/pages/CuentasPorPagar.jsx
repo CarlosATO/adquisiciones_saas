@@ -305,7 +305,7 @@ export default function CuentasPorPagar() {
                     <td className="px-4 py-2 text-center">
                       <span className="inline-flex items-center gap-1 text-slate-500 font-bold">
                         <FileText size={11} />
-                        {po.docs.length}
+                        {po.invoices.length + po.creditNotes.length}
                       </span>
                     </td>
                     <td className="px-4 py-2 text-right font-mono text-slate-700">
@@ -332,7 +332,12 @@ export default function CuentasPorPagar() {
                           <CreditCard size={11} /> Registrar Pago
                         </button>
                       ) : (
-                        <span className="text-[10px] text-slate-300 font-bold uppercase">Saldado</span>
+                        <button
+                          onClick={() => openPayModal(po)}
+                          className="text-slate-500 border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1 rounded-sm text-[10px] font-black uppercase transition-all inline-flex items-center gap-1"
+                        >
+                          <FileText size={11} /> Ver Detalle
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -346,14 +351,16 @@ export default function CuentasPorPagar() {
       {/* Modal Odoo-style */}
       {showModal && selectedPo && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[200] flex items-center justify-center p-4">
-          <div className="bg-white rounded-sm shadow-xl w-full max-w-3xl flex flex-col overflow-hidden border border-gray-300 max-h-[90vh]">
+          <div className={`bg-white rounded-sm shadow-xl w-full flex flex-col overflow-hidden border border-gray-300 max-h-[90vh] ${selectedPo.status.key === 'PAID' ? 'max-w-2xl' : 'max-w-3xl'}`}>
 
             {/* Header */}
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-3">
                 <CreditCard size={20} style={{ color: BRAND_PRIMARY }} strokeWidth={2.5} />
                 <div>
-                  <h3 className="text-sm font-bold text-gray-800 uppercase tracking-tight">Registrar Pago</h3>
+                  <h3 className="text-sm font-bold text-gray-800 uppercase tracking-tight">
+                    {selectedPo.status.key === 'PAID' ? 'Detalle de Pagos' : 'Registrar Pago'}
+                  </h3>
                   <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">
                     OC #{String(selectedPo.po_number).padStart(4, '0')} · {supplierName(selectedPo)}
                   </p>
@@ -366,20 +373,31 @@ export default function CuentasPorPagar() {
 
             {/* Toolbar */}
             <div className="px-4 py-2 bg-white border-b border-gray-100 flex gap-2 shrink-0">
-              <button
-                onClick={handleSubmit}
-                disabled={saving}
-                style={{ backgroundColor: BRAND_PRIMARY }}
-                className="text-white px-6 py-1 rounded-sm text-xs font-bold uppercase shadow-sm hover:opacity-90 disabled:opacity-50 transition-all"
-              >
-                {saving ? 'Guardando...' : 'Confirmar Pago'}
-              </button>
-              <button
-                onClick={() => setShowModal(false)}
-                className="bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-1 rounded-sm text-xs font-bold uppercase shadow-sm transition-all"
-              >
-                Descartar
-              </button>
+              {selectedPo.status.key !== 'PAID' ? (
+                <>
+                  <button
+                    onClick={handleSubmit}
+                    disabled={saving}
+                    style={{ backgroundColor: BRAND_PRIMARY }}
+                    className="text-white px-6 py-1 rounded-sm text-xs font-bold uppercase shadow-sm hover:opacity-90 disabled:opacity-50 transition-all"
+                  >
+                    {saving ? 'Guardando...' : 'Confirmar Pago'}
+                  </button>
+                  <button
+                    onClick={() => setShowModal(false)}
+                    className="bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-1 rounded-sm text-xs font-bold uppercase shadow-sm transition-all"
+                  >
+                    Descartar
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-1 rounded-sm text-xs font-bold uppercase shadow-sm transition-all"
+                >
+                  Cerrar
+                </button>
+              )}
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -456,7 +474,7 @@ export default function CuentasPorPagar() {
                 </div>
               </div>
 
-              {/* Formulario del pago */}
+              {selectedPo.status.key !== 'PAID' && (
               <div className="grid grid-cols-2 gap-x-16 gap-y-4">
                 <div className="space-y-4">
                   <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Datos del Pago</p>
@@ -533,6 +551,31 @@ export default function CuentasPorPagar() {
                   <p className="text-[9px] text-gray-400">El pago se distribuye automáticamente entre los documentos con saldo.</p>
                 </div>
               </div>
+              )}
+
+              {/* Resumen solo lectura para órdenes pagadas */}
+              {selectedPo.status.key === 'PAID' && (
+                <div className="bg-green-50 border border-green-200 rounded-sm p-4 flex flex-col gap-3">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-500 font-bold uppercase tracking-tighter">Total Facturado</span>
+                    <span className="font-bold font-mono text-gray-800">${Math.round(selectedPo.totalInvoiced).toLocaleString('es-CL')}</span>
+                  </div>
+                  {selectedPo.creditNotes.length > 0 && (
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-red-500 font-bold uppercase tracking-tighter">(-) Notas de Crédito</span>
+                      <span className="font-bold font-mono text-red-500">-${Math.round(selectedPo.totalCredits).toLocaleString('es-CL')}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-500 font-bold uppercase tracking-tighter">Total Pagado</span>
+                    <span className="font-bold font-mono text-green-600">${Math.round(selectedPo.totalPaid).toLocaleString('es-CL')}</span>
+                  </div>
+                  <div className="border-t border-green-200 pt-2 flex justify-between items-center">
+                    <span className="text-green-700 font-black text-xs uppercase tracking-tighter">Estado</span>
+                    <span className="inline-flex px-2 py-0.5 rounded-sm text-[10px] font-black border uppercase bg-green-100 text-green-700 border-green-300">✓ Saldado</span>
+                  </div>
+                </div>
+              )}
             </div>
 
           </div>
