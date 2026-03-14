@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../api/supabaseClient';
-import { Plus, ShoppingCart, Trash2, ArrowLeft, CheckCircle, Clock, FileEdit, Search, ChevronRight, History, Download, Mail, Truck, X } from 'lucide-react';
+import { Plus, ShoppingCart, Trash2, ArrowLeft, CheckCircle, Clock, FileEdit, Search, ChevronRight, History, Download, Mail, Truck, X, RotateCcw } from 'lucide-react';
 import SearchableSelect from '../components/ui/SearchableSelect';
 import { PDFDownloadLink, pdf } from '@react-pdf/renderer';
 import PurchaseOrderPDF from '../components/PurchaseOrderPDF';
@@ -43,6 +43,11 @@ export default function OrdenesCompra() {
     finish_order: false
   });
   const [receivingLines, setReceivingLines] = useState([]);
+
+  // Estados para Devolución
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [returnData, setReturnData] = useState({ document_type: 'NOTA_CREDITO', document_number: '', notes: '' });
+  const [returningLines, setReturningLines] = useState([]);
 
   useEffect(() => {
     fetchInitialData();
@@ -447,6 +452,133 @@ export default function OrdenesCompra() {
     }
   };
 
+  const handleOpenReturn = () => {
+    setReturningLines(
+      orderLines
+        .filter(l => Number(l.received_quantity) > 0)
+        .map(l => ({ ...l, return_now: 0 }))
+    );
+    setReturnData({ document_type: 'NOTA_CREDITO', document_number: '', notes: '' });
+    setShowReturnModal(true);
+  };
+
+  const handleValidateReturn = async () => {
+    if (!returnData.document_number) return alert("Ingrese el número de documento.");
+    const itemsToReturn = returningLines.filter(l => Number(l.return_now) > 0);
+    if (itemsToReturn.length === 0) return alert("Ingrese al menos una cantidad a devolver.");
+    for (const l of itemsToReturn) {
+      if (Number(l.return_now) > Number(l.received_quantity)) {
+        return alert(`No puede devolver más de lo recibido para "${l.products?.name}".`);
+      }
+    }
+    setSaving(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      // 1. Cabecera de devolución en inventory_receipts
+      const { data: returnReceipt, error: receiptErr } = await supabase
+        .from('inventory_receipts')
+        .insert([{
+          company_id: companyId,
+          po_id: selectedOrder.id,
+          supplier_id: selectedOrder.supplier_id,
+          document_type: returnData.document_type,
+          document_number: returnData.document_number,
+          notes: returnData.notes,
+          created_by: user.id,
+          status: 'DONE'
+        }])
+        .select()
+        .single();
+      if (receiptErr) throw receiptErr;
+
+      for (const line of itemsToReturn) {
+        // 2. Movimiento Kardex (OUT)
+        const { error: moveErr } = await supabase
+          .from('inventory_movements')
+          .insert([{
+            company_id: companyId,
+            product_id: line.product_id,
+            user_id: user.id,
+            movement_type: 'OUT',
+            quantity: Number(line.return_now),
+            reason: `Devolución OC #${selectedOrder.po_number} - ${returnData.document_type} ${returnData.document_number}`,
+            receipt_id: returnReceipt.id
+          }]);
+        if (moveErr) throw moveErr;
+
+        // 3. Actualizar stock real (restar)
+        const { data: product } = await supabase.from('products').select('stock_quantity').eq('id', line.product_id).single();
+        const newStock = Math.max(0, Number(product?.stock_quantity || 0) - Number(line.return_now));
+        const { error: prodErr } = await supabase.from('products').update({ stock_quantity: newStock }).eq('id', line.product_id);
+        if (prodErr) throw prodErr;
+
+        // 4. Actualizar cantidad recibida en la línea de OC (restar)
+        const newReceived = Math.max(0, Number(line.received_quantity) - Number(line.return_now));
+        const { error: poLineErr } = await supabase
+          .from('purchase_order_items')
+          .update({ received_quantity: newReceived })
+          .eq('id', line.id);
+        if (poLineErr) throw poLineErr;
+      }
+
+      // 5. Recalcular estado de la OC
+      const { data: updatedLines } = await supabase
+        .from('purchase_order_items')
+        .select('quantity, received_quantity')
+        .eq('po_id', selectedOrder.id);
+      const allReceived = updatedLines.every(l => Number(l.received_quantity) >= Number(l.quantity));
+      const anyReceived = updatedLines.some(l => Number(l.received_quantity) > 0);
+      let nextStatus = 'PENDING';
+      if (allReceived) nextStatus = 'RECEIVED';
+      else if (anyReceived) nextStatus = 'PARTIAL';
+
+      const { error: statusErr } = await supabase
+        .from('purchase_orders')
+        .update({ status: nextStatus })
+        .eq('id', selectedOrder.id);
+      if (statusErr) throw statusErr;
+
+      // 6. Integración financiera: si existe alguna factura ligada a esta OC, crear nota de crédito negativa
+      const { data: existingExpenses } = await supabase
+        .from('expenses')
+        .select('id')
+        .eq('po_id', selectedOrder.id)
+        .gt('amount', 0);
+
+      if (existingExpenses && existingExpenses.length > 0) {
+        const returnedSubtotal = itemsToReturn.reduce((s, l) => s + (Number(l.return_now) * Number(l.unit_cost)), 0);
+        const returnedTotal = Math.round(returnedSubtotal * 1.19);
+        const { error: expErr } = await supabase
+          .from('expenses')
+          .insert([{
+            company_id: companyId,
+            user_id: user.id,
+            category: 'NOTA_CREDITO',
+            amount: -returnedTotal,
+            description: `${returnData.document_type} ${returnData.document_number} - Dev. OC #${selectedOrder.po_number} - ${selectedOrder.suppliers?.business_name || selectedOrder.suppliers?.name}`,
+            expense_date: new Date().toISOString().split('T')[0],
+            po_id: selectedOrder.id,
+            receipt_id: returnReceipt.id,
+            supplier_id: selectedOrder.supplier_id,
+            document_number: returnData.document_number,
+            status: 'PENDING_PAYMENT',
+          }]);
+        if (expErr) console.warn('No se pudo registrar nota de crédito en expenses:', expErr.message);
+      }
+
+      alert("Devolución procesada correctamente.");
+      setShowReturnModal(false);
+      fetchOrderDetails(selectedOrder);
+      fetchInitialData();
+    } catch (error) {
+      console.error(error);
+      alert("Error al procesar devolución: " + error.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSaveOrder = async (orderStatus) => {
     if (!selectedSupplier) return alert("Selecciona un proveedor.");
     const validLines = lines.filter(l => l.product_id && l.quantity > 0);
@@ -721,6 +853,14 @@ export default function OrdenesCompra() {
                                 className="text-white px-4 py-1.5 rounded-sm text-xs font-bold transition-colors uppercase shadow-sm flex items-center gap-2 hover:opacity-90"
                             >
                                 <Truck size={14} /> {selectedOrder.status === 'PARTIAL' ? 'Completar Recepción' : 'Recibir Mercadería'}
+                            </button>
+                        )}
+                        {orderLines.some(l => Number(l.received_quantity) > 0) && (
+                            <button
+                                onClick={handleOpenReturn}
+                                className="text-red-700 border border-red-200 bg-red-50 hover:bg-red-100 px-4 py-1.5 rounded-sm text-xs font-bold transition-colors uppercase shadow-sm flex items-center gap-2"
+                            >
+                                <RotateCcw size={14} /> Devolver Productos
                             </button>
                         )}
                         {selectedOrder.status === 'PARTIAL' && (
@@ -1048,6 +1188,145 @@ export default function OrdenesCompra() {
             </div>
           </div>
         )}
+        {/* MODAL DE DEVOLUCIÓN */}
+        {showReturnModal && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[200] flex items-center justify-center p-4">
+            <div className="bg-white rounded-sm shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden border border-red-200">
+              {/* Header */}
+              <div className="px-4 py-3 border-b border-red-100 bg-red-50 flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="text-red-600"><RotateCcw size={20} strokeWidth={2.5} /></div>
+                  <div>
+                    <h3 className="text-sm font-bold text-red-800 uppercase tracking-tight">Devolución de Mercadería</h3>
+                    <div className="text-[10px] text-red-500 font-bold uppercase tracking-widest mt-0.5">
+                      OC #{String(selectedOrder.po_number).padStart(4, '0')} · {selectedOrder.suppliers?.business_name || selectedOrder.suppliers?.name}
+                    </div>
+                  </div>
+                </div>
+                <button onClick={() => setShowReturnModal(false)} className="text-red-400 hover:text-red-600 transition-colors"><X size={20} /></button>
+              </div>
+
+              {/* Toolbar */}
+              <div className="px-4 py-2 bg-white border-b border-gray-100 flex gap-2 shrink-0">
+                <button
+                  onClick={handleValidateReturn}
+                  disabled={saving || !returnData.document_number}
+                  className="bg-red-600 hover:bg-red-700 text-white px-6 py-1 rounded-sm text-xs font-bold transition-all uppercase shadow-sm disabled:opacity-50"
+                >
+                  {saving ? 'Procesando...' : 'Validar Devolución'}
+                </button>
+                <button
+                  onClick={() => setShowReturnModal(false)}
+                  className="bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-1 rounded-sm text-xs font-bold transition-all uppercase shadow-sm"
+                >
+                  Descartar
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto bg-white">
+                {/* Formulario (2 columnas) */}
+                <div className="p-6 grid grid-cols-2 gap-x-20 gap-y-4">
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-3 items-center">
+                      <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">Tipo Documento</label>
+                      <select
+                        value={returnData.document_type}
+                        onChange={(e) => setReturnData({...returnData, document_type: e.target.value})}
+                        className="col-span-2 w-full bg-white border border-red-200 rounded-sm px-2 py-1 text-sm focus:border-red-500 focus:ring-1 focus:ring-red-400 outline-none"
+                      >
+                        <option value="NOTA_CREDITO">Nota de Crédito</option>
+                        <option value="GUIA_DEVOLUCION">Guía de Devolución</option>
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-3 items-center">
+                      <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">N° Documento</label>
+                      <input
+                        type="text"
+                        placeholder="Folio..."
+                        value={returnData.document_number}
+                        onChange={(e) => setReturnData({...returnData, document_number: e.target.value.toUpperCase()})}
+                        className="col-span-2 w-full bg-white border border-red-200 rounded-sm px-2 py-1 text-sm focus:border-red-500 focus:ring-1 focus:ring-red-400 outline-none font-bold italic text-red-700"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-3 items-start">
+                      <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter pt-1">Motivo / Obs.</label>
+                      <textarea
+                        rows="2"
+                        placeholder="Motivo de la devolución..."
+                        value={returnData.notes}
+                        onChange={(e) => setReturnData({...returnData, notes: e.target.value.toUpperCase()})}
+                        className="col-span-2 w-full bg-white border border-red-200 rounded-sm px-2 py-1 text-sm focus:border-red-500 focus:ring-1 focus:ring-red-400 outline-none h-16 resize-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tabla de productos a devolver */}
+                <div className="px-6 pb-6">
+                  <div className="border border-red-100 rounded-sm overflow-hidden">
+                    <table className="w-full text-left text-[13px] border-collapse">
+                      <thead className="bg-red-50 border-b border-red-100 text-[10px] font-black text-red-400 uppercase tracking-widest">
+                        <tr>
+                          <th className="px-4 py-2">Producto</th>
+                          <th className="px-4 py-2 text-right w-32">Cant. Recibida</th>
+                          <th className="px-4 py-2 text-right w-36">Costo Unit.</th>
+                          <th className="px-4 py-2 text-right w-36 text-red-600">Cant. a Devolver</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-red-50">
+                        {returningLines.map((line, idx) => (
+                          <tr key={line.id} className="hover:bg-red-50/30">
+                            <td className="px-4 py-2.5">
+                              <div className="font-bold text-gray-800 uppercase tracking-tight">{line.products?.name}</div>
+                              {line.products?.barcode && <div className="text-[9px] text-gray-400 font-mono italic">REF: {line.products?.barcode}</div>}
+                            </td>
+                            <td className="px-4 py-2.5 text-right font-mono text-sm text-gray-500">{line.received_quantity}</td>
+                            <td className="px-4 py-2.5 text-right font-mono text-sm text-gray-500">${Number(line.unit_cost).toLocaleString('es-CL')}</td>
+                            <td className="px-4 py-2.5">
+                              <input
+                                type="number"
+                                min="0"
+                                max={Number(line.received_quantity)}
+                                value={line.return_now}
+                                onChange={(e) => {
+                                  const val = Math.min(Number(e.target.value), Number(line.received_quantity));
+                                  const newLines = [...returningLines];
+                                  newLines[idx].return_now = val < 0 ? 0 : val;
+                                  setReturningLines(newLines);
+                                }}
+                                className="w-full bg-red-50 border border-red-200 rounded-sm px-2 py-1 text-right font-black text-red-700 focus:bg-white focus:border-red-500 outline-none appearance-none"
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <div className="text-right space-y-1">
+                      {(() => {
+                        const sub = returningLines.reduce((s, l) => s + (Number(l.return_now) * Number(l.unit_cost)), 0);
+                        const total = Math.round(sub * 1.19);
+                        return (
+                          <>
+                            <div className="text-[10px] text-gray-400 font-bold uppercase">Subtotal Neto a Devolver: <span className="font-mono text-gray-600">${sub.toLocaleString('es-CL')}</span></div>
+                            <div className="text-sm font-black text-red-700 uppercase">Total a Devolver (c/IVA): <span className="font-mono">${total.toLocaleString('es-CL')}</span></div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  <div className="mt-2 text-[10px] text-red-400 italic">
+                    * Se generará un movimiento OUT en el Kardex y se ajustará el stock y cantidades recibidas.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
           </div>
         </div>
       </div>
