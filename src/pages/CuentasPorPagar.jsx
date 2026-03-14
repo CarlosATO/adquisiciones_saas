@@ -296,6 +296,7 @@ export default function CuentasPorPagar() {
                   <th className="px-4 py-2 w-32 text-right">Total</th>
                   <th className="px-4 py-2 w-28 text-right">Pagado</th>
                   <th className="px-4 py-2 w-28 text-right">Saldo</th>
+                  <th className="px-4 py-2 w-28 text-right">Nota Créd.</th>
                   <th className="px-4 py-2 w-28 text-center">Estado</th>
                   <th className="px-4 py-2 w-36 text-center">Acción</th>
                 </tr>
@@ -324,6 +325,12 @@ export default function CuentasPorPagar() {
                     </td>
                     <td className="px-4 py-2 text-right font-black font-mono" style={{ color: po.balance > 0 ? BRAND_PRIMARY : '#16a34a' }}>
                       ${Math.round(po.balance).toLocaleString('es-CL')}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono">
+                      {po.creditNotes.length > 0
+                        ? <span className="text-red-500 font-bold">-${Math.round(po.totalCredits).toLocaleString('es-CL')}</span>
+                        : <span className="text-slate-300">—</span>
+                      }
                     </td>
                     <td className="px-4 py-2 text-center">
                       <span className={`inline-flex px-2 py-0.5 rounded-sm text-[9px] font-black border uppercase ${po.status.color}`}>

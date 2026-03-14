@@ -23,6 +23,9 @@ export default function OrdenesCompra() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [orderLines, setOrderLines] = useState([]);
+  const [orderReceipts, setOrderReceipts] = useState([]);
+  const [orderExpenses, setOrderExpenses] = useState([]);
+  const [orderMovements, setOrderMovements] = useState([]);
 
   // Estados del Formulario
   const [suppliers, setSuppliers] = useState([]);
@@ -262,6 +265,37 @@ export default function OrdenesCompra() {
 
       setSelectedOrder(orderData);
       setOrderLines(linesData);
+
+      // 3. Recepciones vinculadas a esta OC
+      const { data: receiptsData } = await supabase
+        .from('inventory_receipts')
+        .select('id, document_type, document_number, created_at, notes, status')
+        .eq('po_id', orderId)
+        .eq('status', 'DONE')
+        .order('created_at', { ascending: true });
+      setOrderReceipts(receiptsData || []);
+
+      // 4. Expenses vinculadas (facturas + notas de crédito)
+      const { data: expensesData } = await supabase
+        .from('expenses')
+        .select('id, category, document_number, amount, expense_date, status, description')
+        .eq('po_id', orderId)
+        .order('expense_date', { ascending: true });
+      setOrderExpenses(expensesData || []);
+
+      // 5. Movimientos de inventario vinculados a recepciones de esta OC
+      if (receiptsData && receiptsData.length > 0) {
+        const receiptIds = receiptsData.map(r => r.id);
+        const { data: movementsData } = await supabase
+          .from('inventory_movements')
+          .select('id, movement_type, quantity, reason, created_at, products(name)')
+          .in('receipt_id', receiptIds)
+          .order('created_at', { ascending: false });
+        setOrderMovements(movementsData || []);
+      } else {
+        setOrderMovements([]);
+      }
+
       setView('detail');
     } catch (error) {
       console.error('Error fetching order details:', error);
@@ -1031,6 +1065,107 @@ export default function OrdenesCompra() {
                         </div>
                     </div>
                 )}
+
+                {/* ============ SECCIÓN: DOCUMENTOS ASOCIADOS ============ */}
+                {selectedOrder.status !== 'DRAFT' && (orderReceipts.length > 0 || orderExpenses.length > 0) && (
+                  <div className="mt-10 pt-8 border-t border-slate-200">
+                    <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Documentos Asociados</h3>
+                    <div className="border border-slate-200 rounded-sm overflow-hidden">
+                      <table className="w-full text-xs border-collapse">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase tracking-tighter text-slate-500 font-bold">
+                          <tr>
+                            <th className="px-4 py-2 text-left">Tipo</th>
+                            <th className="px-4 py-2 text-left">N° Documento</th>
+                            <th className="px-4 py-2 text-left">Fecha</th>
+                            <th className="px-4 py-2 text-right">Monto</th>
+                            <th className="px-4 py-2 text-left">Notas</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {/* Recepciones (Guías / Facturas registradas en inventory_receipts) */}
+                          {orderReceipts.map(r => (
+                            <tr key={r.id} className="hover:bg-slate-50/50">
+                              <td className="px-4 py-2">
+                                <span className={`inline-flex px-1.5 py-0.5 rounded-sm text-[9px] font-black border uppercase ${
+                                  r.document_type === 'FACTURA' ? 'bg-blue-50 text-blue-700 border-blue-200' :
+                                  r.document_type === 'GUIA_DESPACHO' ? 'bg-purple-50 text-purple-700 border-purple-200' :
+                                  'bg-slate-50 text-slate-600 border-slate-200'
+                                }`}>
+                                  {r.document_type === 'GUIA_DESPACHO' ? 'Guía Despacho' : r.document_type === 'FACTURA' ? 'Factura' : r.document_type}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2 font-mono font-bold text-indigo-700">{r.document_number || '—'}</td>
+                              <td className="px-4 py-2 font-mono text-slate-500 text-[10px]">{r.created_at?.split('T')[0]}</td>
+                              <td className="px-4 py-2 text-right text-slate-400 font-mono">—</td>
+                              <td className="px-4 py-2 text-slate-400 text-[10px] italic">{r.notes || ''}</td>
+                            </tr>
+                          ))}
+                          {/* Facturas/NC en expenses */}
+                          {orderExpenses.map(e => {
+                            const isCredit = Number(e.amount) < 0;
+                            return (
+                              <tr key={e.id} className={isCredit ? 'bg-red-50/30 hover:bg-red-50/50' : 'hover:bg-slate-50/50'}>
+                                <td className="px-4 py-2">
+                                  <span className={`inline-flex px-1.5 py-0.5 rounded-sm text-[9px] font-black border uppercase ${
+                                    isCredit ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'
+                                  }`}>
+                                    {isCredit ? ((e.description || '').includes('GUIA_DEVOLUCION') ? 'Guía Devolución' : 'Nota Crédito') : 'Factura Registrada'}
+                                  </span>
+                                </td>
+                                <td className={`px-4 py-2 font-mono font-bold ${isCredit ? 'text-red-600' : 'text-indigo-700'}`}>{e.document_number || '—'}</td>
+                                <td className="px-4 py-2 font-mono text-slate-500 text-[10px]">{e.expense_date}</td>
+                                <td className={`px-4 py-2 text-right font-mono font-bold ${isCredit ? 'text-red-600' : 'text-slate-700'}`}>
+                                  {isCredit ? `-$${Math.round(Math.abs(Number(e.amount))).toLocaleString('es-CL')}` : `$${Math.round(Number(e.amount)).toLocaleString('es-CL')}`}
+                                </td>
+                                <td className="px-4 py-2 text-slate-400 text-[10px] italic">{e.description || ''}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* ============ SECCIÓN: HISTORIAL DE MOVIMIENTOS ============ */}
+                {selectedOrder.status !== 'DRAFT' && orderMovements.length > 0 && (
+                  <div className="mt-8 pt-6 border-t border-slate-200">
+                    <h3 className="text-[10px] font-black uppercase text-slate-400 tracking-widest mb-4">Historial de Movimientos de Inventario</h3>
+                    <div className="border border-slate-200 rounded-sm overflow-hidden">
+                      <table className="w-full text-xs border-collapse">
+                        <thead className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase tracking-tighter text-slate-500 font-bold">
+                          <tr>
+                            <th className="px-4 py-2 text-left">Producto</th>
+                            <th className="px-4 py-2 text-center w-24">Tipo</th>
+                            <th className="px-4 py-2 text-right w-24">Cantidad</th>
+                            <th className="px-4 py-2 text-left">Razón</th>
+                            <th className="px-4 py-2 text-left w-32">Fecha</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {orderMovements.map(m => (
+                            <tr key={m.id} className={m.movement_type === 'OUT' ? 'bg-red-50/20' : ''}>
+                              <td className="px-4 py-2 font-bold text-slate-700 uppercase tracking-tight">{m.products?.name || '—'}</td>
+                              <td className="px-4 py-2 text-center">
+                                <span className={`inline-flex px-1.5 py-0.5 rounded-sm text-[9px] font-black border uppercase ${
+                                  m.movement_type === 'IN' ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-600 border-red-200'
+                                }`}>
+                                  {m.movement_type === 'IN' ? '▲ Entrada' : '▼ Salida'}
+                                </span>
+                              </td>
+                              <td className={`px-4 py-2 text-right font-black font-mono ${m.movement_type === 'IN' ? 'text-green-600' : 'text-red-500'}`}>
+                                {m.movement_type === 'OUT' ? '-' : '+'}{m.quantity}
+                              </td>
+                              <td className="px-4 py-2 text-slate-500 text-[10px] italic">{m.reason}</td>
+                              <td className="px-4 py-2 font-mono text-slate-400 text-[10px]">{m.created_at?.split('T')[0]}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
                     {/* MODAL DE RECEPCION (ESTILO ODOO PREMIUM) */}
         {showReceiptModal && (
           <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[200] flex items-center justify-center p-4">
