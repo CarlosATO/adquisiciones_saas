@@ -392,13 +392,47 @@ export default function OrdenesCompra() {
       } else if (anyReceived) {
         nextStatus = 'PARTIAL';
       }
-      
+
+      // 6. Actualizar estado de la OC primero (siempre debe ejecutarse)
       const { error: finalUpdErr } = await supabase
         .from('purchase_orders')
         .update({ status: nextStatus })
         .eq('id', selectedOrder.id);
-      
       if (finalUpdErr) throw finalUpdErr;
+
+      // 7. Si el documento es FACTURA, registrar en expenses (operación secundaria no bloqueante)
+      if (receiptData.document_type === 'FACTURA') {
+        const receivedSubtotal = receivingLines
+          .filter(l => Number(l.received_now) > 0)
+          .reduce((s, l) => s + (Number(l.received_now) * Number(l.unit_cost)), 0);
+        const receivedTotal = Math.round(receivedSubtotal * 1.19);
+
+        const { error: expErr } = await supabase
+          .from('expenses')
+          .insert([{
+            company_id: companyId,
+            user_id: user.id,
+            category: 'OTROS',
+            amount: receivedTotal,
+            description: `FACTURA ${receiptData.document_number} - ${selectedOrder.suppliers?.business_name || selectedOrder.suppliers?.name}`,
+            expense_date: new Date().toISOString().split('T')[0],
+            po_id: selectedOrder.id,
+            receipt_id: receipt.id,
+            supplier_id: selectedOrder.supplier_id,
+            document_number: receiptData.document_number,
+            status: 'PENDING_PAYMENT',
+          }]);
+
+        if (!expErr) {
+          // Solo marcar como facturada si el insert de expenses fue exitoso
+          await supabase
+            .from('purchase_orders')
+            .update({ billing_status: 'BILLED' })
+            .eq('id', selectedOrder.id);
+        } else {
+          console.warn('No se pudo registrar en expenses (¿migración pendiente?):', expErr.message);
+        }
+      }
 
       alert("Recepción procesada correctamente e inventario actualizado.");
       setShowReceiptModal(false);

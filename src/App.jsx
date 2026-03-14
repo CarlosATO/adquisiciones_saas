@@ -67,16 +67,12 @@ const DashboardAdquisiciones = () => (
   </div>
 );
 
-const DummyRecepcion = () => (
-  <div className="p-8 flex items-center justify-center h-full">
-    <h1 className="text-2xl font-bold text-slate-400">Recepción (Próximamente)</h1>
-  </div>
-);
-
 import MainLayout from './layouts/MainLayout';
 import Productos from './pages/Productos';
 import Proveedores from './pages/Proveedores';
 import OrdenesCompra from './pages/OrdenesCompra';
+import Facturacion from './pages/Facturacion';
+import CuentasPorPagar from './pages/CuentasPorPagar';
 
 function App() {
   return (
@@ -86,7 +82,9 @@ function App() {
         <Route path="/productos" element={<PrivateRoute><MainLayout><Productos /></MainLayout></PrivateRoute>} />
         <Route path="/proveedores" element={<PrivateRoute><MainLayout><Proveedores /></MainLayout></PrivateRoute>} />
         <Route path="/ordenes" element={<PrivateRoute><MainLayout><OrdenesCompra /></MainLayout></PrivateRoute>} />
-        <Route path="/recepcion" element={<PrivateRoute><MainLayout><DummyRecepcion /></MainLayout></PrivateRoute>} />
+        <Route path="/recepcion" element={<Navigate to="/ordenes" replace />} />
+        <Route path="/facturacion" element={<PrivateRoute><MainLayout><Facturacion /></MainLayout></PrivateRoute>} />
+        <Route path="/cuentas-por-pagar" element={<PrivateRoute><MainLayout><CuentasPorPagar /></MainLayout></PrivateRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
