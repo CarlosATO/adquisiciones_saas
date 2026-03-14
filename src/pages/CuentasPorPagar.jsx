@@ -73,7 +73,7 @@ export default function CuentasPorPagar() {
       // 2. Expenses vinculadas a esas OC
       const { data: expenses, error: eErr } = await supabase
         .from('expenses')
-        .select('id, po_id, document_number, amount, paid_amount, status, expense_date, due_date')
+        .select('id, po_id, category, document_number, amount, paid_amount, status, expense_date, due_date')
         .in('po_id', poIds)
         .not('po_id', 'is', null);
 
@@ -348,10 +348,10 @@ export default function CuentasPorPagar() {
         )}
       </div>
 
-      {/* Modal Odoo-style */}
+      {/* Modal / Panel lateral derecho */}
       {showModal && selectedPo && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[200] flex items-center justify-center p-4">
-          <div className={`bg-white rounded-sm shadow-xl w-full flex flex-col overflow-hidden border border-gray-300 max-h-[90vh] ${selectedPo.status.key === 'PAID' ? 'max-w-2xl' : 'max-w-3xl'}`}>
+        <div className="fixed inset-0 bg-black/30 z-[200] flex justify-end" onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false); }}>
+          <div className={`bg-white h-full w-full max-w-xl flex flex-col overflow-hidden border-l border-gray-300 shadow-2xl`}>
 
             {/* Header */}
             <div className="px-4 py-3 border-b border-gray-200 bg-gray-50 flex justify-between items-center shrink-0">
