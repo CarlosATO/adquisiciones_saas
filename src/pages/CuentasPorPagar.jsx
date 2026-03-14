@@ -12,14 +12,16 @@ const PAYMENT_METHODS = [
 ];
 
 const DOC_LABELS = {
-  FACTURA:       'Factura',
-  GUIA_DESPACHO: 'Guía de Despacho',
-  BOLETA:        'Boleta',
+  FACTURA:        'Factura',
+  GUIA_DESPACHO:  'Guía de Despacho',
+  BOLETA:         'Boleta',
+  NOTA_CREDITO:   'Nota de Crédito',
+  GUIA_DEVOLUCION:'Guía Devolución',
 };
 
-function poPayStatus(totalAmount, totalPaid) {
+function poPayStatus(netAmount, totalPaid) {
   if (totalPaid <= 0)              return { key: 'PENDING',  label: 'Pendiente', color: 'bg-orange-50 text-orange-600 border-orange-200' };
-  if (totalPaid >= totalAmount)    return { key: 'PAID',     label: 'Pagado',    color: 'bg-green-50 text-green-700 border-green-200' };
+  if (totalPaid >= netAmount)      return { key: 'PAID',     label: 'Pagado',    color: 'bg-green-50 text-green-700 border-green-200' };
   return                                  { key: 'PARTIAL',  label: 'Parcial',   color: 'bg-amber-50 text-amber-700 border-amber-200' };
 }
 
@@ -102,21 +104,27 @@ export default function CuentasPorPagar() {
           const paidReal   = expPayments.reduce((s, p) => s + Number(p.amount), 0);
           return {
             ...exp,
-            document_type: receipt?.document_type || 'FACTURA',
+            document_type: exp.category === 'NOTA_CREDITO' ? 'NOTA_CREDITO' : (receipt?.document_type || 'FACTURA'),
             paid_amount:   paidReal || Number(exp.paid_amount || 0),
           };
         });
 
-        const totalAmount = docs.reduce((s, d) => s + Number(d.amount || 0), 0);
-        const totalPaid   = docs.reduce((s, d) => s + Number(d.paid_amount || 0), 0);
-        const balance     = Math.max(0, totalAmount - totalPaid);
-        const status      = poPayStatus(totalAmount, totalPaid);
+        const invoices    = docs.filter(d => Number(d.amount) > 0);
+        const creditNotes = docs.filter(d => Number(d.amount) < 0);
 
-        return { ...po, docs, totalAmount, totalPaid, balance, status };
+        const totalInvoiced = invoices.reduce((s, d) => s + Number(d.amount), 0);
+        const totalCredits  = creditNotes.reduce((s, d) => s + Math.abs(Number(d.amount)), 0);
+        const totalPaid     = invoices.reduce((s, d) => s + Number(d.paid_amount || 0), 0);
+        const netAmount     = Math.max(0, totalInvoiced - totalCredits);
+        const balance       = Math.max(0, netAmount - totalPaid);
+        const totalAmount   = totalInvoiced; // kept for backward compat display
+        const status        = poPayStatus(netAmount, totalPaid);
+
+        return { ...po, docs, invoices, creditNotes, totalAmount, totalInvoiced, totalCredits, totalPaid, netAmount, balance, status };
       });
 
-      // Solo mostrar OC que tengan al menos 1 factura/documento vinculado en expenses
-      setPoList(enriched.filter(po => po.docs.length > 0));
+      // Solo mostrar OC que tengan al menos 1 factura/documento positivo
+      setPoList(enriched.filter(po => po.invoices.length > 0));
     } catch (err) {
       console.error(err);
     } finally {
@@ -145,7 +153,7 @@ export default function CuentasPorPagar() {
     try {
       // Distribuir el pago entre los documentos con saldo, en orden de fecha
       let remaining = payAmount;
-      const pendingDocs = [...selectedPo.docs]
+      const pendingDocs = [...selectedPo.invoices]
         .filter(d => Number(d.amount || 0) - Number(d.paid_amount || 0) > 0)
         .sort((a, b) => (a.expense_date || '').localeCompare(b.expense_date || ''));
 
@@ -392,7 +400,8 @@ export default function CuentasPorPagar() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
-                      {selectedPo.docs.map((doc) => {
+                      {/* Facturas y guías (positivas) */}
+                      {selectedPo.invoices.map((doc) => {
                         const docBalance = Math.max(0, Number(doc.amount || 0) - Number(doc.paid_amount || 0));
                         return (
                           <tr key={doc.id} className={docBalance === 0 ? 'bg-green-50/40' : ''}>
@@ -413,11 +422,32 @@ export default function CuentasPorPagar() {
                           </tr>
                         );
                       })}
+                      {/* Notas de crédito / guías de devolución (negativas) */}
+                      {selectedPo.creditNotes.map((doc) => (
+                        <tr key={doc.id} className="bg-red-50/40">
+                          <td className="px-3 py-2">
+                            <span className="inline-flex px-1.5 py-0.5 rounded-sm text-[9px] font-black border uppercase bg-red-50 text-red-600 border-red-200">
+                              {DOC_LABELS[doc.document_type] || doc.document_type}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 font-mono font-bold text-[11px] text-red-600">
+                            {doc.document_number}
+                          </td>
+                          <td className="px-3 py-2 text-slate-500 font-mono text-[10px]">{doc.expense_date}</td>
+                          <td className="px-3 py-2 text-right font-mono font-bold text-red-600">
+                            -${Math.round(Math.abs(Number(doc.amount || 0))).toLocaleString('es-CL')}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-slate-400">—</td>
+                          <td className="px-3 py-2 text-right font-mono text-red-500">
+                            -${Math.round(Math.abs(Number(doc.amount || 0))).toLocaleString('es-CL')}
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                     <tfoot className="bg-slate-50 border-t border-gray-200 font-black text-xs">
                       <tr>
                         <td colSpan="3" className="px-3 py-2 uppercase text-slate-500 text-[10px] tracking-widest">Total</td>
-                        <td className="px-3 py-2 text-right font-mono">${Math.round(selectedPo.totalAmount).toLocaleString('es-CL')}</td>
+                        <td className="px-3 py-2 text-right font-mono">${Math.round(selectedPo.totalInvoiced).toLocaleString('es-CL')}</td>
                         <td className="px-3 py-2 text-right font-mono text-green-600">${Math.round(selectedPo.totalPaid).toLocaleString('es-CL')}</td>
                         <td className="px-3 py-2 text-right font-mono" style={{ color: BRAND_PRIMARY }}>${Math.round(selectedPo.balance).toLocaleString('es-CL')}</td>
                       </tr>
@@ -482,8 +512,14 @@ export default function CuentasPorPagar() {
                 <div className="bg-gray-50 border border-gray-200 rounded-sm p-4 flex flex-col justify-center gap-3 self-start mt-5">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-gray-500 font-bold uppercase tracking-tighter">Total Facturado</span>
-                    <span className="font-bold font-mono text-gray-800">${Math.round(selectedPo.totalAmount).toLocaleString('es-CL')}</span>
+                    <span className="font-bold font-mono text-gray-800">${Math.round(selectedPo.totalInvoiced).toLocaleString('es-CL')}</span>
                   </div>
+                  {selectedPo.creditNotes.length > 0 && (
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-red-500 font-bold uppercase tracking-tighter">(-) Notas de Crédito</span>
+                      <span className="font-bold font-mono text-red-500">-${Math.round(selectedPo.totalCredits).toLocaleString('es-CL')}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-gray-500 font-bold uppercase tracking-tighter">Ya Pagado</span>
                     <span className="font-bold font-mono text-green-600">${Math.round(selectedPo.totalPaid).toLocaleString('es-CL')}</span>
