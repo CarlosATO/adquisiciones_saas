@@ -18,6 +18,7 @@ export default function Facturacion() {
   const [companyId, setCompanyId]       = useState(null);
   const [userId, setUserId]             = useState(null);
   const [searchTerm, setSearchTerm]     = useState('');
+  const [typeFilter, setTypeFilter]     = useState('ALL');
   const [modalMode, setModalMode]       = useState(null); // 'register' | 'view'
   const [selectedReceipt, setSelectedReceipt] = useState(null);
   const [saving, setSaving]             = useState(false);
@@ -198,13 +199,14 @@ export default function Facturacion() {
     setSaving(true);
     try {
       const internalId = 'LOG-' + Date.now().toString().slice(-6);
-      const { error } = await supabase.from('expenses').insert([{
+      const supplier   = allSuppliers.find(s => s.id === logFormData.supplier_id);
+      const newExp = {
         company_id:      companyId,
         user_id:         userId,
         category:        'OTROS',
         internal_id:     internalId,
         supplier_id:     logFormData.supplier_id,
-        document_number: logFormData.document_number,
+        document_number: logFormData.document_number.toUpperCase(),
         amount:          Number(logFormData.amount),
         expense_date:    logFormData.issue_date,
         due_date:        logFormData.due_date || null,
@@ -212,12 +214,22 @@ export default function Facturacion() {
         status:          'PENDING_PAYMENT',
         po_id:           null,
         receipt_id:      null,
-      }]);
+      };
+      const { data: inserted, error } = await supabase.from('expenses').insert([newExp]).select().single();
       if (error) throw error;
+
+      // Optimistic update: prepend to receipts list
+      const fakeReceipt = {
+        id: inserted?.id || Date.now(), document_type: 'FACTURA_LOGISTICA',
+        document_number: newExp.document_number,
+        created_at: new Date().toISOString(), po: { po_number: internalId },
+        supplier: supplier || null, amount: Number(logFormData.amount),
+        linkedExpense: inserted, isInvoiced: true, invoiceNumber: newExp.document_number,
+        isLogistic: true,
+      };
+      setReceipts(prev => [fakeReceipt, ...prev]);
       setLogModalOpen(false);
       setLogFormData({ supplier_id: '', document_number: '', amount: '', issue_date: new Date().toISOString().split('T')[0], due_date: '', description: '' });
-      fetchData();
-      alert('Factura logística registrada correctamente.');
     } catch (err) {
       alert('Error: ' + err.message);
     } finally {
@@ -230,44 +242,78 @@ export default function Facturacion() {
     const name = (r.supplier?.business_name || r.supplier?.name || '').toLowerCase();
     const po   = String(r.po?.po_number || '');
     const doc  = String(r.document_number || '').toLowerCase();
-    return name.includes(q) || po.includes(q) || doc.includes(q);
+    const matchQ = !q || name.includes(q) || po.includes(q) || doc.includes(q);
+    let matchT = true;
+    if (typeFilter === 'PENDIENTE')        matchT = !r.isInvoiced;
+    else if (typeFilter === 'LOGISTICA')   matchT = r.isLogistic;
+    else if (typeFilter === 'FACTURA')     matchT = !r.isLogistic && r.document_type === 'FACTURA';
+    else if (typeFilter === 'GUIA')        matchT = r.document_type === 'GUIA_DESPACHO';
+    else if (typeFilter === 'BOLETA')      matchT = r.document_type === 'BOLETA';
+    return matchQ && matchT;
   });
 
-  const pendingCount = filtered.filter(r => !r.isInvoiced).length;
-  const billedCount  = filtered.filter(r => r.isInvoiced).length;
+  // (counts computed inline in JSX)
 
   return (
-    <div className="flex flex-col h-[calc(100vh-40px)] bg-slate-50 text-slate-800 text-sm overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-40px)] bg-gray-50 text-slate-800 text-sm overflow-hidden">
 
       {/* Control Panel */}
-      <div className="border-b border-slate-300 px-4 py-1.5 bg-white flex flex-col gap-1 shrink-0">
-        <nav className="flex items-center text-[10px] text-slate-500 uppercase tracking-widest font-bold">
-          <span>Adquisiciones</span>
-          <ChevronRight size={10} className="mx-1" />
-          <span className="text-slate-900">Control de Facturas de Proveedor</span>
-        </nav>
+      <div className="border-b border-slate-300 px-5 py-2 bg-white flex flex-col gap-2 shrink-0">
         <div className="flex justify-between items-center">
-          <p className="text-[11px] text-slate-400 uppercase tracking-widest font-bold">
-            {pendingCount} pendiente{pendingCount !== 1 ? 's' : ''} · {billedCount} facturada{billedCount !== 1 ? 's' : ''}
-          </p>
+          <div>
+            <nav className="flex items-center text-[10px] text-slate-400 uppercase tracking-widest font-bold mb-0.5">
+              <span>Adquisiciones</span>
+              <ChevronRight size={10} className="mx-1" />
+              <span className="text-slate-700">Control de Facturas de Proveedor</span>
+            </nav>
+            <p className="text-[11px] text-slate-400 uppercase tracking-widest font-bold">
+              {receipts.filter(r => !r.isInvoiced).length} pendiente{receipts.filter(r => !r.isInvoiced).length !== 1 ? 's' : ''} ·{' '}
+              {receipts.filter(r => r.isInvoiced).length} facturada{receipts.filter(r => r.isInvoiced).length !== 1 ? 's' : ''}
+            </p>
+          </div>
           <div className="flex gap-2 items-center">
-            <div className="relative w-72">
+            <div className="relative w-64">
               <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
                 placeholder="Buscar proveedor, OC o N° documento..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="block w-full rounded-sm border border-slate-300 pl-8 pr-3 py-1 text-xs focus:outline-none focus:border-indigo-500"
+                className="block w-full rounded-sm border border-slate-200 pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-[#4C3073]"
               />
             </div>
             <button
               onClick={() => setLogModalOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1 text-xs font-bold uppercase rounded-sm border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-all"
+              style={{ backgroundColor: BRAND_PRIMARY }}
+              className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold uppercase rounded-sm text-white hover:opacity-90 transition-all shadow-sm"
             >
-              <Plus size={12} /> Nueva Factura Logística
+              <Plus size={13} /> Nueva Factura Logística
             </button>
           </div>
+        </div>
+
+        {/* Tabs de filtro por tipo */}
+        <div className="flex gap-0 border-b border-slate-200 -mb-2">
+          {[
+            { key: 'ALL',       label: 'Todas' },
+            { key: 'PENDIENTE', label: 'Pendientes' },
+            { key: 'FACTURA',   label: 'Facturas' },
+            { key: 'GUIA',      label: 'Guías de Despacho' },
+            { key: 'BOLETA',    label: 'Boletas' },
+            { key: 'LOGISTICA', label: 'Logísticas' },
+          ].map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTypeFilter(t.key)}
+              className={`px-4 py-1.5 text-[11px] font-bold uppercase tracking-widest border-b-2 transition-all ${
+                typeFilter === t.key
+                  ? 'border-[#4C3073] text-[#4C3073]'
+                  : 'border-transparent text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -487,99 +533,145 @@ export default function Facturacion() {
           </div>
         </div>
       )}
-      {/* Modal Factura Logística */}
+      {/* Modal Factura Logística — Odoo Style */}
       {logModalOpen && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-[2px] z-[200] flex items-center justify-center p-4">
-          <div className="bg-white rounded-sm shadow-xl w-full max-w-xl flex flex-col overflow-hidden border border-gray-300">
-            <div className="px-4 py-3 border-b border-gray-200 bg-amber-50 flex justify-between items-center shrink-0">
+          <div className="bg-white rounded-sm shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden border border-gray-200">
+
+            {/* Header */}
+            <div className="px-5 py-3 border-b border-gray-200 bg-gray-50 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-3">
-                <FileText size={20} className="text-amber-600" strokeWidth={2.5} />
+                <FileText size={20} style={{ color: BRAND_PRIMARY }} strokeWidth={2.5} />
                 <div>
-                  <h3 className="text-sm font-bold text-gray-800 uppercase tracking-tight">Nueva Factura Logística</h3>
-                  <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">Sin Orden de Compra asociada</p>
+                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-tight">Nueva Factura Logística</h3>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mt-0.5">
+                    Sin Orden de Compra asociada · Gasto directo de servicio
+                  </p>
                 </div>
               </div>
-              <button onClick={() => setLogModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors"><X size={20} /></button>
+              <button onClick={() => setLogModalOpen(false)} className="text-gray-400 hover:text-gray-600 transition-colors p-1">
+                <X size={18} />
+              </button>
             </div>
-            <form onSubmit={handleSaveLogistic} className="p-6 space-y-4">
-              <div className="grid grid-cols-3 items-center">
-                <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">Proveedor</label>
-                <select
-                  required
-                  value={logFormData.supplier_id}
-                  onChange={(e) => setLogFormData({ ...logFormData, supplier_id: e.target.value })}
-                  className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1 text-sm focus:border-amber-500 focus:ring-1 focus:ring-amber-400 outline-none"
-                >
-                  <option value="">— Seleccionar —</option>
-                  {allSuppliers.map(s => <option key={s.id} value={s.id}>{s.business_name || s.name}</option>)}
-                </select>
+
+            {/* Toolbar — Guardar / Descartar arriba (Odoo style) */}
+            <div className="px-5 py-2 bg-white border-b border-gray-100 flex gap-2 shrink-0">
+              <button
+                form="log-form"
+                type="submit"
+                disabled={saving}
+                style={{ backgroundColor: BRAND_PRIMARY }}
+                className="text-white px-6 py-1 rounded-sm text-xs font-bold uppercase shadow-sm hover:opacity-90 disabled:opacity-50 transition-all"
+              >
+                {saving ? 'Guardando...' : 'Guardar'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setLogModalOpen(false)}
+                className="bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-1 rounded-sm text-xs font-bold uppercase shadow-sm transition-all"
+              >
+                Descartar
+              </button>
+            </div>
+
+            {/* Formulario 2 columnas — Odoo style */}
+            <form id="log-form" onSubmit={handleSaveLogistic} className="p-6 grid grid-cols-2 gap-x-10 gap-y-4">
+
+              {/* Columna izquierda */}
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 items-center">
+                  <label className="text-gray-500 font-bold text-[11px] text-right pr-5 uppercase tracking-tighter">Proveedor</label>
+                  <select
+                    required
+                    value={logFormData.supplier_id}
+                    onChange={(e) => setLogFormData({ ...logFormData, supplier_id: e.target.value })}
+                    className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1.5 text-sm focus:border-[#4C3073] focus:ring-1 focus:ring-[#4C3073] outline-none"
+                  >
+                    <option value="">— Seleccionar —</option>
+                    {allSuppliers.map(s => <option key={s.id} value={s.id}>{s.business_name || s.name}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-3 items-center">
+                  <label className="text-gray-500 font-bold text-[11px] text-right pr-5 uppercase tracking-tighter">N° Documento</label>
+                  <input
+                    required
+                    value={logFormData.document_number}
+                    onChange={(e) => setLogFormData({ ...logFormData, document_number: e.target.value.toUpperCase() })}
+                    placeholder="Folio..."
+                    className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1.5 text-sm font-mono font-bold focus:border-[#4C3073] focus:ring-1 focus:ring-[#4C3073] outline-none"
+                    style={{ color: BRAND_PRIMARY }}
+                  />
+                </div>
+                <div className="grid grid-cols-3 items-center">
+                  <label className="text-gray-500 font-bold text-[11px] text-right pr-5 uppercase tracking-tighter">Monto</label>
+                  <input
+                    required
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={logFormData.amount}
+                    onChange={(e) => setLogFormData({ ...logFormData, amount: e.target.value })}
+                    placeholder="0"
+                    className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1.5 text-sm font-mono font-bold focus:border-[#4C3073] focus:ring-1 focus:ring-[#4C3073] outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+                    style={{ color: BRAND_PRIMARY }}
+                  />
+                </div>
+                <div className="grid grid-cols-3 items-start">
+                  <label className="text-gray-500 font-bold text-[11px] text-right pr-5 uppercase tracking-tighter pt-1.5">Descripción</label>
+                  <textarea
+                    rows={3}
+                    value={logFormData.description}
+                    onChange={(e) => setLogFormData({ ...logFormData, description: e.target.value })}
+                    placeholder="Concepto del servicio, detalles adicionales..."
+                    className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1.5 text-sm focus:border-[#4C3073] focus:ring-1 focus:ring-[#4C3073] outline-none resize-none"
+                  />
+                </div>
               </div>
-              <div className="grid grid-cols-3 items-center">
-                <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">N° Documento</label>
-                <input
-                  required
-                  value={logFormData.document_number}
-                  onChange={(e) => setLogFormData({ ...logFormData, document_number: e.target.value })}
-                  placeholder="Folio..."
-                  className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1 text-sm focus:border-amber-500 outline-none"
-                />
-              </div>
-              <div className="grid grid-cols-3 items-center">
-                <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">Monto</label>
-                <input
-                  required
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={logFormData.amount}
-                  onChange={(e) => setLogFormData({ ...logFormData, amount: e.target.value })}
-                  placeholder="0"
-                  className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1 text-sm focus:border-amber-500 outline-none"
-                />
-              </div>
-              <div className="grid grid-cols-3 items-center">
-                <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">Fecha Emisión</label>
-                <input
-                  type="date"
-                  value={logFormData.issue_date}
-                  onChange={(e) => setLogFormData({ ...logFormData, issue_date: e.target.value })}
-                  className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1 text-sm focus:border-amber-500 outline-none"
-                />
-              </div>
-              <div className="grid grid-cols-3 items-center">
-                <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">Vencimiento</label>
-                <input
-                  type="date"
-                  value={logFormData.due_date}
-                  onChange={(e) => setLogFormData({ ...logFormData, due_date: e.target.value })}
-                  className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1 text-sm focus:border-amber-500 outline-none"
-                />
-              </div>
-              <div className="grid grid-cols-3 items-start">
-                <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter pt-1.5">Descripción</label>
-                <textarea
-                  rows={2}
-                  value={logFormData.description}
-                  onChange={(e) => setLogFormData({ ...logFormData, description: e.target.value })}
-                  placeholder="Concepto, detalles del servicio..."
-                  className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1 text-sm focus:border-amber-500 outline-none resize-none"
-                />
-              </div>
-              <div className="flex gap-2 pt-2">
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="bg-amber-600 text-white px-6 py-1.5 rounded-sm text-xs font-bold uppercase shadow-sm hover:bg-amber-700 disabled:opacity-50 transition-all"
-                >
-                  {saving ? 'Guardando...' : 'Registrar Factura'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLogModalOpen(false)}
-                  className="bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-1.5 rounded-sm text-xs font-bold uppercase transition-all"
-                >
-                  Descartar
-                </button>
+
+              {/* Columna derecha */}
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 items-center">
+                  <label className="text-gray-500 font-bold text-[11px] text-right pr-5 uppercase tracking-tighter">Fecha Emisión</label>
+                  <input
+                    type="date"
+                    required
+                    value={logFormData.issue_date}
+                    onChange={(e) => setLogFormData({ ...logFormData, issue_date: e.target.value })}
+                    className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1.5 text-sm focus:border-[#4C3073] focus:ring-1 focus:ring-[#4C3073] outline-none"
+                  />
+                </div>
+                <div className="grid grid-cols-3 items-center">
+                  <label className="text-gray-500 font-bold text-[11px] text-right pr-5 uppercase tracking-tighter">Vencimiento</label>
+                  <input
+                    type="date"
+                    value={logFormData.due_date}
+                    onChange={(e) => setLogFormData({ ...logFormData, due_date: e.target.value })}
+                    className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1.5 text-sm focus:border-[#4C3073] focus:ring-1 focus:ring-[#4C3073] outline-none"
+                  />
+                </div>
+
+                {/* Preview del monto */}
+                {logFormData.amount && Number(logFormData.amount) > 0 && (
+                  <div className="bg-gray-50 border border-gray-200 rounded-sm p-4 mt-2 flex flex-col gap-2">
+                    <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Resumen</p>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-gray-500 font-bold uppercase tracking-tighter">Monto</span>
+                      <span className="font-black text-base font-mono" style={{ color: BRAND_PRIMARY }}>
+                        ${Number(logFormData.amount).toLocaleString('es-CL')}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="text-gray-500 uppercase tracking-tighter">Estado inicial</span>
+                      <span className="inline-flex px-2 py-0.5 rounded-sm text-[9px] font-black border bg-orange-50 text-orange-600 border-orange-200 uppercase">Pendiente de pago</span>
+                    </div>
+                    {logFormData.due_date && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-gray-500 uppercase tracking-tighter">Vence</span>
+                        <span className="font-mono text-gray-700">{logFormData.due_date}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </form>
           </div>
