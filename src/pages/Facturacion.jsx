@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../api/supabaseClient';
-import { FileText, Search, ChevronRight, X, Eye, Plus } from 'lucide-react';
+import { FileText, Search, ChevronRight, X, Eye, Plus, AlertCircle } from 'lucide-react';
 
 const BRAND_PRIMARY = '#4C3073';
 
@@ -33,6 +33,7 @@ export default function Facturacion() {
     supplier_id: '', document_number: '', amount: '',
     issue_date: new Date().toISOString().split('T')[0], due_date: '', description: '',
   });
+  const [logReminderVisible, setLogReminderVisible] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -240,6 +241,8 @@ export default function Facturacion() {
       setReceipts(prev => [fakeReceipt, ...prev]);
       setLogModalOpen(false);
       setLogFormData({ supplier_id: '', document_number: '', amount: '', issue_date: new Date().toISOString().split('T')[0], due_date: '', description: '' });
+      setLogReminderVisible(true);
+      setTimeout(() => setLogReminderVisible(false), 12000); // auto-hide 12s
     } catch (err) {
       alert('Error: ' + err.message);
     } finally {
@@ -326,6 +329,23 @@ export default function Facturacion() {
           ))}
         </div>
       </div>
+
+      {/* ── TOAST: Recordatorio Costos en Destino ── */}
+      {logReminderVisible && (
+        <div className="mx-4 mt-3 flex items-start gap-3 bg-amber-50 border border-amber-400 rounded-sm px-4 py-3 shadow-md shrink-0">
+          <AlertCircle size={15} className="text-amber-600 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-[11px] font-black uppercase tracking-widest text-amber-800">Paso siguiente obligatorio</p>
+            <p className="text-[11px] text-amber-800 mt-0.5">
+              <strong>Asigna esta factura logística a las Órdenes de Compra en "Costos en Destino" ANTES de vender la mercadería.</strong>
+              {' '}El costo prorrateado no puede aplicarse si el stock ya está en 0.
+            </p>
+          </div>
+          <button onClick={() => setLogReminderVisible(false)} className="text-amber-400 hover:text-amber-700 shrink-0">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Tabla */}
       <div className="flex-1 overflow-auto p-2">

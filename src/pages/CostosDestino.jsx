@@ -256,6 +256,18 @@ export default function CostosDestino() {
         </p>
       </div>
 
+      {/* ── BANNER EDUCATIVO PERMANENTE ── */}
+      <div className="mx-5 mt-3 flex items-start gap-3 bg-amber-50 border border-amber-300 rounded-sm px-4 py-3 shrink-0">
+        <AlertCircle size={15} className="text-amber-600 shrink-0 mt-0.5" />
+        <div>
+          <p className="text-[11px] font-black uppercase tracking-widest text-amber-700">Importante · Orden de Operaciones</p>
+          <p className="text-[11px] text-amber-800 mt-0.5">
+            <strong>Los Costos en Destino deben asignarse ANTES de vender la mercadería</strong> para que el margen de ganancia sea exacto.
+            Si los productos ya fueron vendidos (stock = 0), el costo prorrateado no podrá ajustar su valor en inventario.
+          </p>
+        </div>
+      </div>
+
       {/* Success Banner */}
       {successMsg && (
         <div className="mx-5 mt-3 flex items-center gap-2 bg-green-50 border border-green-200 rounded-sm px-4 py-2.5 shrink-0">

@@ -25,6 +25,8 @@ export default function AdquisicionesDashboard() {
   const [ultimasOrdenes, setUltimasOrdenes] = useState([]);
   const [notasCredito, setNotasCredito]   = useState(0);
 
+  const [unallocatedLog, setUnallocatedLog] = useState([]); // LOG- con saldo sin asignar
+
   useEffect(() => { fetchDashboardData(); }, []);
 
   const fetchDashboardData = async () => {
@@ -107,6 +109,35 @@ export default function AdquisicionesDashboard() {
         .limit(5);
       setUltimasOrdenes(ordenes || []);
 
+      // 6. Facturas logísticas con saldo sin asignar (LOG- donde allocated < amount)
+      const { data: logExpenses } = await supabase
+        .from('expenses')
+        .select('id, internal_id, amount, expense_date, suppliers(business_name, name)')
+        .eq('company_id', companyId)
+        .like('internal_id', 'LOG-%')
+        .gt('amount', 0);
+
+      if (logExpenses?.length) {
+        const logIds = logExpenses.map(e => e.id);
+        const { data: allocs } = await supabase
+          .from('landed_cost_allocations')
+          .select('expense_id, allocated_amount')
+          .in('expense_id', logIds);
+
+        const allocMap = {};
+        (allocs || []).forEach(a => {
+          allocMap[a.expense_id] = (allocMap[a.expense_id] || 0) + Number(a.allocated_amount);
+        });
+
+        const pending = logExpenses.filter(e => {
+          const allocated = allocMap[e.id] || 0;
+          return allocated < Number(e.amount) - 0.01; // pequeña tolerancia de redondeo
+        });
+        setUnallocatedLog(pending);
+      } else {
+        setUnallocatedLog([]);
+      }
+
     } catch (err) {
       console.error('Dashboard error:', err);
     } finally {
@@ -145,6 +176,36 @@ export default function AdquisicionesDashboard() {
       </div>
 
       <div className="p-6 space-y-6 max-w-7xl mx-auto w-full">
+
+        {/* ── ALERTA: Facturas logísticas sin asignar ── */}
+        {unallocatedLog.length > 0 && (
+          <div className="bg-orange-50 border border-orange-300 rounded-sm px-4 py-3 flex items-start gap-3">
+            <AlertCircle size={18} className="text-orange-500 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-xs font-black uppercase tracking-widest text-orange-700">
+                ⚠️ {unallocatedLog.length} Factura{unallocatedLog.length > 1 ? 's' : ''} Logística{unallocatedLog.length > 1 ? 's' : ''} sin asignar a órdenes de compra
+              </p>
+              <p className="text-[11px] text-orange-700 mt-1">
+                <strong>Los Costos en Destino deben asignarse ANTES de vender la mercadería</strong> para que el margen de ganancia sea exacto.
+                Si los productos se venden con stock = 0 antes de asignar, el costo de flete NO ajustará su valor en inventario.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {unallocatedLog.map(e => (
+                  <span key={e.id} className="inline-flex items-center gap-1 bg-orange-100 border border-orange-200 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-sm uppercase">
+                    {e.internal_id} · {e.suppliers?.business_name || e.suppliers?.name || '—'}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <button
+              onClick={() => navigate('/costos-destino')}
+              className="shrink-0 text-[10px] font-black uppercase px-3 py-1.5 rounded-sm text-white hover:opacity-90 transition"
+              style={{ backgroundColor: '#c2410c' }}
+            >
+              Asignar ahora →
+            </button>
+          </div>
+        )}
 
         {/* ── FILA 1: KPI CARDS ── */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
