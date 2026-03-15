@@ -15,7 +15,8 @@ import {
     HelpCircle,
     PackageCheck,
     Receipt,
-    CreditCard
+    CreditCard,
+    Anchor
 } from 'lucide-react';
 
 const BRAND_PRIMARY = '#4C3073';
@@ -46,6 +47,7 @@ const buildRibbonTabs = (userRole) => {
                 { to: '/proveedores', label: 'Proveedores', icon: Users },
                 { to: '/ordenes', label: 'Órdenes de Compra', icon: ClipboardList },
                 { to: '/recepcion', label: 'Recepción', icon: PackageCheck },
+                { to: '/costos-destino', label: 'Costos en Destino', icon: Anchor },
                 { to: '/facturacion',      label: 'Facturación',      icon: Receipt },
                 { to: '/cuentas-por-pagar', label: 'Cuentas por Pagar', icon: CreditCard },
             ],

@@ -73,6 +73,7 @@ import Proveedores from './pages/Proveedores';
 import OrdenesCompra from './pages/OrdenesCompra';
 import Facturacion from './pages/Facturacion';
 import CuentasPorPagar from './pages/CuentasPorPagar';
+import CostosDestino from './pages/CostosDestino';
 import AdquisicionesDashboard from './pages/AdquisicionesDashboard';
 
 function App() {
@@ -87,6 +88,7 @@ function App() {
         <Route path="/recepcion" element={<Navigate to="/ordenes" replace />} />
         <Route path="/facturacion" element={<PrivateRoute><MainLayout><Facturacion /></MainLayout></PrivateRoute>} />
         <Route path="/cuentas-por-pagar" element={<PrivateRoute><MainLayout><CuentasPorPagar /></MainLayout></PrivateRoute>} />
+        <Route path="/costos-destino" element={<PrivateRoute><MainLayout><CostosDestino /></MainLayout></PrivateRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
