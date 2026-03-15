@@ -17,7 +17,8 @@ import {
     Receipt,
     CreditCard,
     Anchor,
-    CheckSquare
+    CheckSquare,
+    Settings
 } from 'lucide-react';
 
 const BRAND_PRIMARY = '#4C3073';
@@ -54,6 +55,18 @@ const buildRibbonTabs = (userRole, moduleRoles) => {
             items.splice(3, 0, { to: '/aprobaciones', label: 'Aprobaciones', icon: CheckSquare });
         }
         tabs.push({ id: 'adquisiciones', label: 'Adquisiciones', icon: Truck, items });
+    }
+
+    // Module 3: Configuración (solo OWNER)
+    if (userRole === 'OWNER') {
+        tabs.push({
+            id: 'configuracion',
+            label: 'Configuración',
+            icon: Settings,
+            items: [
+                { to: '/configuracion', label: 'Configuración', icon: Settings },
+            ],
+        });
     }
 
     return tabs;

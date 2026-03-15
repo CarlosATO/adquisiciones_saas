@@ -76,6 +76,7 @@ import CuentasPorPagar from './pages/CuentasPorPagar';
 import CostosDestino from './pages/CostosDestino';
 import AdquisicionesDashboard from './pages/AdquisicionesDashboard';
 import Aprobaciones from './pages/Aprobaciones';
+import Configuracion from './pages/Configuracion';
 
 function App() {
   return (
@@ -91,6 +92,7 @@ function App() {
         <Route path="/cuentas-por-pagar" element={<PrivateRoute><MainLayout><CuentasPorPagar /></MainLayout></PrivateRoute>} />
         <Route path="/costos-destino" element={<PrivateRoute><MainLayout><CostosDestino /></MainLayout></PrivateRoute>} />
         <Route path="/aprobaciones"   element={<PrivateRoute><MainLayout><Aprobaciones /></MainLayout></PrivateRoute>} />
+        <Route path="/configuracion"  element={<PrivateRoute><MainLayout><Configuracion /></MainLayout></PrivateRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
