@@ -16,16 +16,18 @@ import {
     PackageCheck,
     Receipt,
     CreditCard,
-    Anchor
+    Anchor,
+    CheckSquare
 } from 'lucide-react';
 
 const BRAND_PRIMARY = '#4C3073';
 
-const buildRibbonTabs = (userRole) => {
+const buildRibbonTabs = (userRole, moduleRoles) => {
+    const isManager = userRole === 'OWNER' || userRole === 'MANAGER' || moduleRoles?.ADQUISICIONES === 'MANAGER';
     const tabs = [];
     
     // Module 1: Inicio / Dashboard
-    if (['OWNER', 'MANAGER'].includes(userRole)) {
+    if (isManager) {
         tabs.push({
             id: 'inicio',
             label: 'Inicio',
@@ -37,21 +39,21 @@ const buildRibbonTabs = (userRole) => {
     }
 
     // Module 2: Adquisiciones (Local)
-    if (['OWNER', 'MANAGER', 'PURCHASER'].includes(userRole)) {
-        tabs.push({
-            id: 'adquisiciones',
-            label: 'Adquisiciones',
-            icon: Truck,
-            items: [
-                { to: '/productos', label: 'Productos', icon: Package },
-                { to: '/proveedores', label: 'Proveedores', icon: Users },
-                { to: '/ordenes', label: 'Órdenes de Compra', icon: ClipboardList },
-                { to: '/recepcion', label: 'Recepción', icon: PackageCheck },
-                { to: '/costos-destino', label: 'Costos en Destino', icon: Anchor },
-                { to: '/facturacion',      label: 'Facturación',      icon: Receipt },
-                { to: '/cuentas-por-pagar', label: 'Cuentas por Pagar', icon: CreditCard },
-            ],
-        });
+    if (isManager || userRole === 'PURCHASER') {
+        const items = [
+            { to: '/productos', label: 'Productos', icon: Package },
+            { to: '/proveedores', label: 'Proveedores', icon: Users },
+            { to: '/ordenes', label: 'Órdenes de Compra', icon: ClipboardList },
+            { to: '/recepcion', label: 'Recepción', icon: PackageCheck },
+            { to: '/costos-destino', label: 'Costos en Destino', icon: Anchor },
+            { to: '/facturacion',      label: 'Facturación',      icon: Receipt },
+            { to: '/cuentas-por-pagar', label: 'Cuentas por Pagar', icon: CreditCard },
+        ];
+        // Solo MANAGER / OWNER ven la bandeja de aprobaciones
+        if (isManager) {
+            items.splice(3, 0, { to: '/aprobaciones', label: 'Aprobaciones', icon: CheckSquare });
+        }
+        tabs.push({ id: 'adquisiciones', label: 'Adquisiciones', icon: Truck, items });
     }
 
     return tabs;
@@ -60,39 +62,42 @@ const buildRibbonTabs = (userRole) => {
 export default function MainLayout({ children }) {
     const navigate = useNavigate();
     const location = useLocation();
-    const [userRole, setUserRole] = useState(null);
-    const [userName, setUserName] = useState('');
-    const [companyName, setCompanyName] = useState('Datix ERP');
-    const [loading, setLoading] = useState(true);
-    const [activeTabId, setActiveTabId] = useState(null);
+    const [userRole, setUserRole]           = useState(null);
+    const [moduleRoles, setModuleRoles]     = useState({});
+    const [userName, setUserName]           = useState('');
+    const [companyName, setCompanyName]     = useState('Datix ERP');
+    const [loading, setLoading]             = useState(true);
+    const [activeTabId, setActiveTabId]     = useState(null);
     const [showAppDrawer, setShowAppDrawer] = useState(false);
 
     useEffect(() => { fetchUserData(); }, []);
 
     useEffect(() => {
         if (!userRole) return;
-        const tabs = buildRibbonTabs(userRole);
+        const tabs = buildRibbonTabs(userRole, moduleRoles);
         const found = tabs.find(t => t.items?.some(i => i.to === location.pathname)) || 
                       tabs.find(t => t.items?.some(i => i.to !== '/' && location.pathname.startsWith(i.to)));
         if (found) setActiveTabId(found.id);
         else setActiveTabId('adquisiciones');
-    }, [location.pathname, userRole]);
+    }, [location.pathname, userRole, moduleRoles]);
 
     const fetchUserData = async () => {
         try {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
             setUserName(user.email.split('@')[0].toUpperCase());
-            const { data, error } = await supabase.from('company_users').select('role, companies(name)').eq('user_id', user.id).single();
+            const { data, error } = await supabase.from('company_users')
+                .select('role, module_roles, companies(name)').eq('user_id', user.id).single();
             if (error) throw error;
             setUserRole(data.role);
+            setModuleRoles(data.module_roles || {});
             setCompanyName(data.companies.name.replace(/Almacen/i, "Adquisiciones"));
         } catch (err) { console.error(err); } finally { setLoading(false); }
     };
 
     if (loading) return <div className="h-screen bg-gray-50 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-primary"></div></div>;
 
-    const tabs = buildRibbonTabs(userRole);
+    const tabs = buildRibbonTabs(userRole, moduleRoles);
     const currentTab = tabs.find(t => t.id === activeTabId) || tabs.find(t => t.id === 'adquisiciones');
 
     return (

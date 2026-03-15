@@ -313,15 +313,26 @@ export default function OrdenesCompra() {
     if (!selectedOrder) return;
     setSaving(true);
     try {
+      // Obtener umbral de aprobación de la empresa
+      const { data: co } = await supabase
+        .from('companies').select('po_approval_threshold').eq('id', companyId).single();
+      const threshold  = Number(co?.po_approval_threshold || 0);
+      const orderTotal = Number(selectedOrder.total_amount || 0);
+      const nextStatus = threshold > 0 && orderTotal >= threshold ? 'WAITING_APPROVAL' : 'PENDING';
+
       const { error } = await supabase
         .from('purchase_orders')
-        .update({ status: 'PENDING' })
+        .update({ status: nextStatus })
         .eq('id', selectedOrder.id);
       
       if (error) throw error;
       
-      setSelectedOrder({ ...selectedOrder, status: 'PENDING' });
-      alert("Pedido confirmado correctamente.");
+      setSelectedOrder({ ...selectedOrder, status: nextStatus });
+      if (nextStatus === 'WAITING_APPROVAL') {
+        alert(`Orden enviada a aprobación. El monto ($${orderTotal.toLocaleString('es-CL')}) supera el umbral configurado.`);
+      } else {
+        alert("Pedido confirmado correctamente.");
+      }
       fetchInitialData();
     } catch (error) {
       console.error(error);
@@ -684,6 +695,17 @@ export default function OrdenesCompra() {
     setSaving(true);
     const totals = calculateTotals();
 
+    // Si está confirmando (no guardando como borrador), verificar umbral
+    let finalStatus = orderStatus;
+    if (orderStatus === 'PENDING') {
+      const { data: co } = await supabase
+        .from('companies').select('po_approval_threshold').eq('id', companyId).single();
+      const threshold = Number(co?.po_approval_threshold || 0);
+      if (threshold > 0 && totals.total >= threshold) {
+        finalStatus = 'WAITING_APPROVAL';
+      }
+    }
+
     try {
       const { data: newOrder, error: orderError } = await supabase
         .from('purchase_orders')
@@ -691,7 +713,7 @@ export default function OrdenesCompra() {
           company_id: companyId,
           supplier_id: selectedSupplier,
           created_by: userId,
-          status: orderStatus,
+          status: finalStatus,
           issue_date: issueDate,
           expected_delivery_date: expectedDate || null,
           subtotal: totals.subtotal,
@@ -714,7 +736,7 @@ export default function OrdenesCompra() {
       const { error: linesError } = await supabase.from('purchase_order_items').insert(itemsPayload);
       if (linesError) throw linesError;
 
-      alert(`${orderStatus === 'DRAFT' ? 'Presupuesto' : 'Orden'} #${String(newOrder.po_number).padStart(4, '0')} guardada correctamente.`);
+      alert(`${finalStatus === 'DRAFT' ? 'Presupuesto' : finalStatus === 'WAITING_APPROVAL' ? 'Orden enviada a aprobación' : 'Orden'} #${String(newOrder.po_number).padStart(4, '0')} guardada correctamente.`);
 
       setLines([]);
       setSelectedSupplier('');
@@ -997,6 +1019,11 @@ export default function OrdenesCompra() {
                             <Mail size={14} /> {sendingEmail ? 'Enviando...' : 'Email'}
                         </button>
                         )}
+                        {selectedOrder.status === 'WAITING_APPROVAL' && (
+                          <span className="text-[10px] text-purple-700 bg-purple-50 border border-purple-200 px-3 py-1.5 rounded-sm font-bold uppercase flex items-center gap-1">
+                            ⏳ En espera de aprobación por un Manager
+                          </span>
+                        )}
                     </div>
                     <button
                         onClick={() => setView('list')}
@@ -1007,6 +1034,7 @@ export default function OrdenesCompra() {
                 </div>
                 <div className="flex items-center gap-2">
                     {selectedOrder.status === 'DRAFT' && <span className="text-[10px] font-black uppercase text-slate-400 border border-slate-200 px-2 py-0.5 rounded-sm bg-slate-50">Solicitud de Presupuesto</span>}
+                    {selectedOrder.status === 'WAITING_APPROVAL' && <span className="text-[10px] font-black uppercase text-purple-700 border border-purple-200 px-2 py-0.5 rounded-sm bg-purple-50">Esperando Aprobación</span>}
                     {selectedOrder.status === 'PENDING' && <span className="text-[10px] font-black uppercase text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded-sm bg-indigo-50">Orden de Compra</span>}
                     {selectedOrder.status === 'PARTIAL' && <span className="text-[10px] font-black uppercase text-amber-600 border border-amber-200 px-2 py-0.5 rounded-sm bg-amber-50">Recibida Parcial</span>}
                     {selectedOrder.status === 'RECEIVED' && <span className="text-[10px] font-black uppercase text-green-600 border border-green-200 px-2 py-0.5 rounded-sm bg-green-50">Orden Recibida</span>}
@@ -1714,6 +1742,11 @@ export default function OrdenesCompra() {
                                         }
                                     </td>
                                     <td className="px-2 py-1.5 text-center">
+                                        {o.status === 'WAITING_APPROVAL' && (
+                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[9px] font-black bg-purple-50 text-purple-700 border border-purple-200 uppercase tracking-tighter">
+                                                Esp. Aprobación
+                                            </span>
+                                        )}
                                         {o.status === 'PENDING' && (
                                             <span className="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 uppercase tracking-tighter">
                                                 Confirmada
