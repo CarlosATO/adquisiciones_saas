@@ -16,8 +16,9 @@ export default function CostosDestino() {
 
   // Wizard state
   const [selectedInvoice, setSelectedInvoice]   = useState(null);
-  const [selectedReceipts, setSelectedReceipts] = useState([]); // array of receipt ids
-  const [allocation, setAllocation]             = useState(null); // preview data
+  const [selectedReceipts, setSelectedReceipts] = useState([]);
+  const [receiptSearch, setReceiptSearch]       = useState('');
+  const [allocation, setAllocation]             = useState(null);
   const [saving, setSaving]                     = useState(false);
   const [successMsg, setSuccessMsg]             = useState('');
 
@@ -86,22 +87,25 @@ export default function CostosDestino() {
           supabase.from('purchase_order_items').select('po_id, product_id, unit_cost').in('po_id', poIds),
         ]);
 
-        const enriched = recs.map(rec => {
-          const recMovs = (movements || []).filter(m => m.receipt_id === rec.id);
-          const items   = (poItems   || []).filter(i => i.po_id === rec.po_id);
-          const value   = recMovs.reduce((sum, m) => {
-            const item = items.find(i => i.product_id === m.product_id);
-            return sum + Number(m.quantity) * Number(item?.unit_cost || 0);
-          }, 0);
-          return {
-            ...rec,
-            po_number:     rec.purchase_orders?.po_number,
-            supplier_name: rec.purchase_orders?.suppliers?.business_name || rec.purchase_orders?.suppliers?.name || '—',
-            value,          // valor monetario de la recepción (sin IVA)
-            movements: recMovs,
-            poItems:   items,
-          };
-        });
+        const enriched = recs
+          // Excluir notas de crédito y guías de devolución de la selección visual
+          .filter(rec => !['NOTA_CREDITO', 'GUIA_DEVOLUCION'].includes(rec.document_type))
+          .map(rec => {
+            const recMovs = (movements || []).filter(m => m.receipt_id === rec.id);
+            const items   = (poItems   || []).filter(i => i.po_id === rec.po_id);
+            const value   = recMovs.reduce((sum, m) => {
+              const item = items.find(i => i.product_id === m.product_id);
+              return sum + Number(m.quantity) * Number(item?.unit_cost || 0);
+            }, 0);
+            return {
+              ...rec,
+              po_number:     rec.purchase_orders?.po_number,
+              supplier_name: rec.purchase_orders?.suppliers?.business_name || rec.purchase_orders?.suppliers?.name || '—',
+              value,
+              movements: recMovs,
+              poItems:   items,
+            };
+          });
 
         setReceipts(enriched);
       } else {
@@ -290,29 +294,43 @@ export default function CostosDestino() {
 
         {/* ── SECCIÓN B: Recepciones ── (col 5-9) */}
         <div className="col-span-5 flex flex-col gap-3">
-          <div className="bg-white border border-slate-200 rounded-sm overflow-hidden flex flex-col">
-            <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-              <div>
-                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">B · Recepciones de Inventario</p>
-                <p className="text-[11px] text-slate-400 mt-0.5">{selectedReceipts.length} seleccionada{selectedReceipts.length !== 1 ? 's' : ''}</p>
+          <div className={`bg-white border rounded-sm overflow-hidden flex flex-col transition-opacity ${!selectedInvoice ? 'border-slate-100 opacity-50 pointer-events-none' : 'border-slate-200'}`}>
+            <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex flex-col gap-2">
+              <div className="flex justify-between items-center">
+                <div>
+                  <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">B · Recepciones de Inventario</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">{selectedReceipts.length} seleccionada{selectedReceipts.length !== 1 ? 's' : ''}</p>
+                </div>
+                {selectedReceipts.length > 0 && (
+                  <button
+                    onClick={() => { setSelectedReceipts([]); setAllocation(null); }}
+                    className="text-[10px] text-slate-400 hover:text-slate-600 uppercase font-bold tracking-widest"
+                  >
+                    Limpiar
+                  </button>
+                )}
               </div>
-              {selectedReceipts.length > 0 && (
-                <button
-                  onClick={() => { setSelectedReceipts([]); setAllocation(null); }}
-                  className="text-[10px] text-slate-400 hover:text-slate-600 uppercase font-bold tracking-widest"
-                >
-                  Limpiar
-                </button>
-              )}
+              {/* Buscador */}
+              <div className="relative">
+                <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input
+                  type="text"
+                  placeholder="Buscar OC, proveedor o documento..."
+                  value={receiptSearch}
+                  onChange={(e) => setReceiptSearch(e.target.value)}
+                  className="w-full pl-7 pr-3 py-1 text-xs border border-slate-200 rounded-sm focus:outline-none focus:border-[#4C3073] bg-white"
+                />
+              </div>
             </div>
-            <div className="flex-1 overflow-auto">
+            {/* Tabla con scroll fijo */}
+            <div className="overflow-y-auto" style={{ maxHeight: '420px' }}>
               {receipts.length === 0 ? (
                 <div className="p-6 text-center text-slate-400">
                   <p className="text-xs font-bold uppercase tracking-widest">Sin recepciones</p>
                 </div>
               ) : (
                 <table className="w-full text-xs border-collapse">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase tracking-tighter text-slate-500 font-bold sticky top-0">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-[10px] uppercase tracking-tighter text-slate-500 font-bold sticky top-0 z-10">
                     <tr>
                       <th className="px-3 py-2 w-8"></th>
                       <th className="px-3 py-2 text-left">OC #</th>
@@ -322,7 +340,15 @@ export default function CostosDestino() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
-                    {receipts.map(rec => {
+                    {receipts.filter(rec => {
+                      const q = receiptSearch.toLowerCase();
+                      if (!q) return true;
+                      return (
+                        String(rec.po_number || '').includes(q) ||
+                        (rec.supplier_name || '').toLowerCase().includes(q) ||
+                        (rec.document_number || '').toLowerCase().includes(q)
+                      );
+                    }).map(rec => {
                       const isChk = selectedReceipts.includes(rec.id);
                       return (
                         <tr
@@ -362,7 +388,7 @@ export default function CostosDestino() {
 
         {/* ── SECCIÓN C: Cálculo ── (col 10-12) */}
         <div className="col-span-3 flex flex-col gap-3">
-          <div className="bg-white border border-slate-200 rounded-sm overflow-hidden flex flex-col">
+          <div className={`bg-white border rounded-sm overflow-hidden flex flex-col transition-opacity ${!selectedInvoice ? 'border-slate-100 opacity-50 pointer-events-none' : 'border-slate-200'}`}>
             <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50">
               <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">C · Distribución</p>
               <p className="text-[11px] text-slate-400 mt-0.5">Prorrateo por valor</p>
