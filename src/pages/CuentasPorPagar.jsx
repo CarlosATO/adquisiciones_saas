@@ -193,12 +193,12 @@ export default function CuentasPorPagar() {
       // PO items con nombre de producto
       const { data: poItems } = await supabase
         .from('purchase_order_items')
-        .select('product_id, quantity, unit_cost, products(id, name)')
+        .select('product_id, quantity, unit_cost, products(name)')
         .eq('po_id', po.id);
 
       // Movimientos de recepción para estos receipts
       const { data: movements } = await supabase
-        .from('inventory_receipt_movements')
+        .from('inventory_movements')
         .select('receipt_id, product_id, quantity')
         .in('receipt_id', po.poReceiptIds);
 
