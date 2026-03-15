@@ -24,8 +24,10 @@ export default function CuentasPorPagar() {
   const [companyId, setCompanyId]     = useState(null);
   const [searchTerm, setSearchTerm]   = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
-  const [showModal, setShowModal]     = useState(false);
-  const [selectedPo, setSelectedPo]   = useState(null);
+  const [showModal, setShowModal]         = useState(false);
+  const [selectedPo, setSelectedPo]       = useState(null);
+  const [modalLandedDetail, setModalLandedDetail] = useState(null); // product-level breakdown
+  const [loadingLanded, setLoadingLanded] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
 
@@ -71,13 +73,26 @@ export default function CuentasPorPagar() {
           .in('po_id', poIds)
           .eq('status', 'DONE');
 
-        // 4. Pagos ya realizados agrupados por expense_id
+        // 4. Landed cost allocations por recepción (para calcular "Costos Asoc." por OC)
+        const receiptIds = (receipts || []).map(r => r.id);
+        let landedByReceipt = {};
+        if (receiptIds.length) {
+          const { data: allocs } = await supabase
+            .from('landed_cost_allocations')
+            .select('receipt_id, allocated_amount')
+            .in('receipt_id', receiptIds);
+          (allocs || []).forEach(a => {
+            landedByReceipt[a.receipt_id] = (landedByReceipt[a.receipt_id] || 0) + Number(a.allocated_amount);
+          });
+        }
+
+        // 5. Pagos ya realizados agrupados por expense_id
         const expenseIds = (expenses || []).map(e => e.id);
         const { data: payments } = expenseIds.length
           ? await supabase.from('supplier_payments').select('expense_id, amount').in('expense_id', expenseIds)
           : { data: [] };
 
-        // 5. Enriquecer cada OC
+        // 6. Enriquecer cada OC
         enriched = orders.map(po => {
           const poExpenses = (expenses || []).filter(e => e.po_id === po.id);
           const poReceipts = (receipts || []).filter(r => r.po_id === po.id);
@@ -111,7 +126,10 @@ export default function CuentasPorPagar() {
           const totalAmount   = totalInvoiced;
           const status        = poPayStatus(netAmount, totalPaid);
 
-          return { ...po, docs, invoices, creditNotes, totalAmount, totalInvoiced, totalCredits, totalPaid, netAmount, balance, status };
+          const poReceiptIds = (receipts || []).filter(r => r.po_id === po.id).map(r => r.id);
+          const landedTotal  = poReceiptIds.reduce((s, rid) => s + (landedByReceipt[rid] || 0), 0);
+
+          return { ...po, docs, invoices, creditNotes, totalAmount, totalInvoiced, totalCredits, totalPaid, netAmount, balance, status, landedTotal, poReceiptIds };
         }).filter(po => po.invoices.length > 0);
       }
 
@@ -159,7 +177,93 @@ export default function CuentasPorPagar() {
     }
   };
 
-  const openModal = (po) => { setSelectedPo(po); setShowModal(true); };
+  const openModal = (po) => {
+    setSelectedPo(po);
+    setShowModal(true);
+    setModalLandedDetail(null);
+    if (!po.isLogistic && po.poReceiptIds?.length && po.landedTotal > 0) {
+      loadModalDetail(po);
+    }
+  };
+
+  /* Carga el desglose producto × flete para el modal */
+  const loadModalDetail = async (po) => {
+    setLoadingLanded(true);
+    try {
+      // PO items con nombre de producto
+      const { data: poItems } = await supabase
+        .from('purchase_order_items')
+        .select('product_id, quantity, unit_cost, products(id, name)')
+        .eq('po_id', po.id);
+
+      // Movimientos de recepción para estos receipts
+      const { data: movements } = await supabase
+        .from('inventory_receipt_movements')
+        .select('receipt_id, product_id, quantity')
+        .in('receipt_id', po.poReceiptIds);
+
+      // Allocations por recepción con info de la factura LOG
+      const { data: allocations } = await supabase
+        .from('landed_cost_allocations')
+        .select('receipt_id, allocated_amount, expenses(internal_id)')
+        .in('receipt_id', po.poReceiptIds);
+
+      if (!poItems || !movements) { setLoadingLanded(false); return; }
+
+      // Agrupar por producto
+      const itemMap = Object.fromEntries((poItems || []).map(i => [i.product_id, i]));
+      const freightByProduct = {};
+
+      // Para cada recepción, calcular flete por producto (proporcional al valor)
+      const receiptGroups = {};
+      (movements || []).forEach(m => {
+        if (!receiptGroups[m.receipt_id]) receiptGroups[m.receipt_id] = [];
+        receiptGroups[m.receipt_id].push(m);
+      });
+
+      Object.entries(receiptGroups).forEach(([rid, movs]) => {
+        const recAllocs = (allocations || []).filter(a => a.receipt_id === rid);
+        const recFreight = recAllocs.reduce((s, a) => s + Number(a.allocated_amount), 0);
+        if (recFreight === 0) return;
+
+        const recValue = movs.reduce((s, m) => {
+          const item = itemMap[m.product_id];
+          return s + (item ? Number(m.quantity) * Number(item.unit_cost) : 0);
+        }, 0);
+
+        movs.forEach(m => {
+          const item = itemMap[m.product_id];
+          if (!item || recValue === 0) return;
+          const prodValue = Number(m.quantity) * Number(item.unit_cost);
+          const prodFreight = (prodValue / recValue) * recFreight;
+          freightByProduct[m.product_id] = (freightByProduct[m.product_id] || 0) + prodFreight;
+        });
+      });
+
+      // Construir tabla de detalle
+      const detail = (poItems || []).map(item => {
+        const freightTotal = freightByProduct[item.product_id] || 0;
+        const qty          = Number(item.quantity);
+        const unitCost     = Number(item.unit_cost);
+        const freightPerUnit = qty > 0 ? freightTotal / qty : 0;
+        return {
+          productId:    item.product_id,
+          productName:  item.products?.name || item.product_id,
+          qty,
+          unitCost,
+          freightTotal,
+          freightPerUnit,
+          totalCostPerUnit: unitCost + freightPerUnit,
+        };
+      }).filter(d => d.qty > 0);
+
+      setModalLandedDetail(detail);
+    } catch (err) {
+      console.error('loadModalDetail error', err);
+    } finally {
+      setLoadingLanded(false);
+    }
+  };
 
   const totalPending = poList.filter(p => p.status.key !== 'PAID').reduce((s, p) => s + p.balance, 0);
   const totalPaid    = poList.reduce((s, p) => s + p.totalPaid, 0);
@@ -247,7 +351,9 @@ export default function CuentasPorPagar() {
                   <th className="px-4 py-2">Proveedor</th>
                   <th className="px-4 py-2 w-24">Fecha OC</th>
                   <th className="px-4 py-2 w-20 text-center">Docs.</th>
-                  <th className="px-4 py-2 w-32 text-right">Total</th>
+                  <th className="px-4 py-2 w-32 text-right">Total OC</th>
+                   <th className="px-4 py-2 w-28 text-right">Costos Asoc.</th>
+                   <th className="px-4 py-2 w-32 text-right">Total</th>
                   <th className="px-4 py-2 w-28 text-right">Pagado</th>
                   <th className="px-4 py-2 w-28 text-right">Saldo</th>
                   <th className="px-4 py-2 w-28 text-right">Nota Créd.</th>
@@ -273,6 +379,14 @@ export default function CuentasPorPagar() {
                     </td>
                     <td className="px-4 py-2 text-right font-mono text-slate-700">
                       ${Math.round(po.totalAmount).toLocaleString('es-CL')}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono text-[11px]">
+                      {(po.landedTotal || 0) > 0
+                        ? <span className="text-amber-600 font-bold">+${Math.round(po.landedTotal).toLocaleString('es-CL')}</span>
+                        : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-right font-black font-mono text-slate-800">
+                      ${Math.round((po.totalAmount || 0) + (po.landedTotal || 0)).toLocaleString('es-CL')}
                     </td>
                     <td className="px-4 py-2 text-right font-mono text-green-600 font-bold">
                       {po.totalPaid > 0 ? `$${Math.round(po.totalPaid).toLocaleString('es-CL')}` : <span className="text-slate-300">—</span>}
@@ -426,7 +540,58 @@ export default function CuentasPorPagar() {
                 </div>
               </div>
 
-              {selectedPo.status.key !== 'PAID' && (
+              {/* ── Desglose de Costos por Producto (solo si hay landed costs) ── */}
+              {!selectedPo.isLogistic && (selectedPo.landedTotal || 0) > 0 && (
+                <div>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest mb-2">
+                    Costos Asociados por Producto (Landed Costs)
+                  </p>
+                  {loadingLanded ? (
+                    <div className="border border-slate-200 rounded-sm p-4 text-center text-xs text-slate-400">Cargando desglose...</div>
+                  ) : modalLandedDetail && modalLandedDetail.length > 0 ? (
+                    <div className="border border-amber-200 rounded-sm overflow-hidden">
+                      <div className="bg-amber-50 px-3 py-1.5 border-b border-amber-100 flex justify-between items-center">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-amber-700">Costo Real en Inventario</p>
+                        <span className="text-[10px] text-amber-600 font-bold">
+                          Flete total asignado: +${Math.round(selectedPo.landedTotal).toLocaleString('es-CL')}
+                        </span>
+                      </div>
+                      <table className="w-full text-[11px] border-collapse">
+                        <thead className="bg-slate-50 border-b border-slate-100 text-[9px] uppercase tracking-tighter text-slate-500 font-bold">
+                          <tr>
+                            <th className="px-3 py-1.5 text-left">Producto</th>
+                            <th className="px-3 py-1.5 text-right">Qty</th>
+                            <th className="px-3 py-1.5 text-right">Costo Unit. OC</th>
+                            <th className="px-3 py-1.5 text-right">+ Flete/u</th>
+                            <th className="px-3 py-1.5 text-right font-black">= Costo Real/u</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {modalLandedDetail.map((d, i) => (
+                            <tr key={i} className="hover:bg-amber-50/30">
+                              <td className="px-3 py-2 font-medium text-slate-700">{d.productName}</td>
+                              <td className="px-3 py-2 text-right font-mono text-slate-500">{d.qty}</td>
+                              <td className="px-3 py-2 text-right font-mono text-slate-600">
+                                ${d.unitCost.toLocaleString('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                              </td>
+                              <td className="px-3 py-2 text-right font-mono text-amber-600 font-bold">
+                                +${d.freightPerUnit.toLocaleString('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                              </td>
+                              <td className="px-3 py-2 text-right font-black font-mono" style={{ color: BRAND_PRIMARY }}>
+                                ${d.totalCostPerUnit.toLocaleString('es-CL', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div className="bg-amber-50 border-t border-amber-100 px-3 py-2 text-[10px] text-amber-700">
+                        <Info size={11} className="inline mr-1" />
+                        El costo real refleja el costo unitario de la OC más el flete prorrateado. El pago al proveedor es solo por el Total OC.
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              )}
                 <div className="bg-gray-50 border border-gray-200 rounded-sm p-4 flex flex-col gap-3">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-gray-500 font-bold uppercase tracking-tighter">Total Facturado</span>
