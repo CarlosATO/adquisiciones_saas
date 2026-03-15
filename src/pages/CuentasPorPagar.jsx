@@ -1,15 +1,8 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../api/supabaseClient';
-import { CreditCard, Search, ChevronRight, X, FileText } from 'lucide-react';
+import { CreditCard, Search, ChevronRight, X, FileText, Eye, Info } from 'lucide-react';
 
 const BRAND_PRIMARY = '#4C3073';
-
-const PAYMENT_METHODS = [
-  { value: 'TRANSFERENCIA', label: 'Transferencia Bancaria' },
-  { value: 'EFECTIVO',      label: 'Efectivo' },
-  { value: 'CHEQUE',        label: 'Cheque' },
-  { value: 'TARJETA',       label: 'Tarjeta' },
-];
 
 const DOC_LABELS = {
   FACTURA:        'Factura',
@@ -29,19 +22,10 @@ export default function CuentasPorPagar() {
   const [poList, setPoList]           = useState([]);
   const [loading, setLoading]         = useState(true);
   const [companyId, setCompanyId]     = useState(null);
-  const [userId, setUserId]           = useState(null);
   const [searchTerm, setSearchTerm]   = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [showModal, setShowModal]     = useState(false);
   const [selectedPo, setSelectedPo]   = useState(null);
-  const [saving, setSaving]           = useState(false);
-  const [formData, setFormData]       = useState({
-    amount:           0,
-    payment_date:     new Date().toISOString().split('T')[0],
-    payment_method:   'TRANSFERENCIA',
-    reference_number: '',
-    notes:            '',
-  });
 
   useEffect(() => { fetchData(); }, []);
 
@@ -50,7 +34,6 @@ export default function CuentasPorPagar() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      setUserId(user.id);
 
       const { data: cu } = await supabase
         .from('company_users').select('company_id').eq('user_id', user.id).single();
@@ -66,73 +49,109 @@ export default function CuentasPorPagar() {
         .order('po_number', { ascending: false });
 
       if (oErr) throw oErr;
-      if (!orders?.length) { setPoList([]); setLoading(false); return; }
 
-      const poIds = orders.map(o => o.id);
+      let enriched = [];
 
-      // 2. Expenses vinculadas a esas OC
-      const { data: expenses, error: eErr } = await supabase
+      if (orders?.length) {
+        const poIds = orders.map(o => o.id);
+
+        // 2. Expenses vinculadas a esas OC
+        const { data: expenses, error: eErr } = await supabase
+          .from('expenses')
+          .select('id, po_id, category, document_number, description, amount, paid_amount, status, expense_date, due_date')
+          .in('po_id', poIds)
+          .not('po_id', 'is', null);
+
+        if (eErr) throw eErr;
+
+        // 3. Receipts para mostrar el tipo de documento (FACTURA / GUIA)
+        const { data: receipts } = await supabase
+          .from('inventory_receipts')
+          .select('id, po_id, document_type, document_number')
+          .in('po_id', poIds)
+          .eq('status', 'DONE');
+
+        // 4. Pagos ya realizados agrupados por expense_id
+        const expenseIds = (expenses || []).map(e => e.id);
+        const { data: payments } = expenseIds.length
+          ? await supabase.from('supplier_payments').select('expense_id, amount').in('expense_id', expenseIds)
+          : { data: [] };
+
+        // 5. Enriquecer cada OC
+        enriched = orders.map(po => {
+          const poExpenses = (expenses || []).filter(e => e.po_id === po.id);
+          const poReceipts = (receipts || []).filter(r => r.po_id === po.id);
+
+          const docs = poExpenses.map(exp => {
+            const isCredit   = Number(exp.amount) < 0;
+            const receipt    = poReceipts.find(r => r.document_number === exp.document_number);
+            const expPayments= (payments || []).filter(p => p.expense_id === exp.id);
+            const paidReal   = expPayments.reduce((s, p) => s + Number(p.amount), 0);
+            let docType;
+            if (isCredit) {
+              docType = (exp.description || '').includes('GUIA_DEVOLUCION') ? 'GUIA_DEVOLUCION' : 'NOTA_CREDITO';
+            } else {
+              docType = receipt?.document_type || 'FACTURA';
+            }
+            return {
+              ...exp,
+              document_type: docType,
+              paid_amount:   paidReal || Number(exp.paid_amount || 0),
+            };
+          });
+
+          const invoices    = docs.filter(d => Number(d.amount) > 0);
+          const creditNotes = docs.filter(d => Number(d.amount) < 0);
+
+          const totalInvoiced = invoices.reduce((s, d) => s + Number(d.amount), 0);
+          const totalCredits  = creditNotes.reduce((s, d) => s + Math.abs(Number(d.amount)), 0);
+          const totalPaid     = invoices.reduce((s, d) => s + Number(d.paid_amount || 0), 0);
+          const netAmount     = Math.max(0, totalInvoiced - totalCredits);
+          const balance       = Math.max(0, netAmount - totalPaid);
+          const totalAmount   = totalInvoiced;
+          const status        = poPayStatus(netAmount, totalPaid);
+
+          return { ...po, docs, invoices, creditNotes, totalAmount, totalInvoiced, totalCredits, totalPaid, netAmount, balance, status };
+        }).filter(po => po.invoices.length > 0);
+      }
+
+      // 6. Facturas Logísticas (LOG-)
+      const { data: logExpenses, error: logErr } = await supabase
         .from('expenses')
-        .select('id, po_id, category, document_number, amount, paid_amount, status, expense_date, due_date')
-        .in('po_id', poIds)
-        .not('po_id', 'is', null);
+        .select('id, internal_id, supplier_id, document_number, amount, paid_amount, status, expense_date, due_date, description, created_at')
+        .eq('company_id', cu.company_id)
+        .like('internal_id', 'LOG-%')
+        .gt('amount', 0)
+        .order('created_at', { ascending: false });
 
-      if (eErr) throw eErr;
+      // Supplier lookup for LOG entries
+      const logSupplierIds = [...new Set((logExpenses || []).map(e => e.supplier_id).filter(Boolean))];
+      let logSupplierMap = {};
+      if (logSupplierIds.length) {
+        const { data: logSuppliers } = await supabase
+          .from('suppliers').select('id, business_name, name').in('id', logSupplierIds);
+        logSupplierMap = Object.fromEntries((logSuppliers || []).map(s => [s.id, s]));
+      }
 
-      // 3. Receipts para mostrar el tipo de documento (FACTURA / GUIA)
-      const { data: receipts } = await supabase
-        .from('inventory_receipts')
-        .select('id, po_id, document_type, document_number')
-        .in('po_id', poIds)
-        .eq('status', 'DONE');
-
-      // 4. Pagos ya realizados agrupados por expense_id
-      const expenseIds = (expenses || []).map(e => e.id);
-      const { data: payments } = expenseIds.length
-        ? await supabase.from('supplier_payments').select('expense_id, amount').in('expense_id', expenseIds)
-        : { data: [] };
-
-      // 5. Enriquecer cada OC
-      const enriched = orders.map(po => {
-        const poExpenses = (expenses || []).filter(e => e.po_id === po.id);
-        const poReceipts = (receipts || []).filter(r => r.po_id === po.id);
-
-        // Enriquecer cada expense con su tipo de documento y pagos
-        const docs = poExpenses.map(exp => {
-          const isCredit   = Number(exp.amount) < 0;
-          const receipt    = poReceipts.find(r => r.document_number === exp.document_number);
-          const expPayments= (payments || []).filter(p => p.expense_id === exp.id);
-          const paidReal   = expPayments.reduce((s, p) => s + Number(p.amount), 0);
-          let docType;
-          if (isCredit) {
-            // Detectar tipo desde la descripción (GUIA_DEVOLUCION o NOTA_CREDITO)
-            docType = (exp.description || '').includes('GUIA_DEVOLUCION') ? 'GUIA_DEVOLUCION' : 'NOTA_CREDITO';
-          } else {
-            docType = receipt?.document_type || 'FACTURA';
-          }
-          return {
-            ...exp,
-            document_type: docType,
-            paid_amount:   paidReal || Number(exp.paid_amount || 0),
-          };
-        });
-
-        const invoices    = docs.filter(d => Number(d.amount) > 0);
-        const creditNotes = docs.filter(d => Number(d.amount) < 0);
-
-        const totalInvoiced = invoices.reduce((s, d) => s + Number(d.amount), 0);
-        const totalCredits  = creditNotes.reduce((s, d) => s + Math.abs(Number(d.amount)), 0);
-        const totalPaid     = invoices.reduce((s, d) => s + Number(d.paid_amount || 0), 0);
-        const netAmount     = Math.max(0, totalInvoiced - totalCredits);
-        const balance       = Math.max(0, netAmount - totalPaid);
-        const totalAmount   = totalInvoiced; // kept for backward compat display
-        const status        = poPayStatus(netAmount, totalPaid);
-
-        return { ...po, docs, invoices, creditNotes, totalAmount, totalInvoiced, totalCredits, totalPaid, netAmount, balance, status };
+      const logMocks = logErr ? [] : (logExpenses || []).map(exp => {
+        const netAmt  = Number(exp.amount);
+        const paid    = Number(exp.paid_amount || 0);
+        const balance = Math.max(0, netAmt - paid);
+        const st      = poPayStatus(netAmt, paid);
+        const supplier = logSupplierMap[exp.supplier_id];
+        return {
+          id: exp.id, po_number: exp.internal_id, issue_date: exp.expense_date,
+          suppliers: supplier ? { business_name: supplier.business_name, name: supplier.name } : null,
+          isLogistic: true,
+          docs: [{ ...exp, document_type: 'FACTURA_LOGISTICA', paid_amount: paid }],
+          invoices:    [{ ...exp, document_type: 'FACTURA_LOGISTICA', paid_amount: paid }],
+          creditNotes: [],
+          totalAmount: netAmt, totalInvoiced: netAmt, totalCredits: 0,
+          totalPaid: paid, netAmount: netAmt, balance, status: st,
+        };
       });
 
-      // Solo mostrar OC que tengan al menos 1 factura/documento positivo
-      setPoList(enriched.filter(po => po.invoices.length > 0));
+      setPoList([...enriched, ...logMocks]);
     } catch (err) {
       console.error(err);
     } finally {
@@ -140,72 +159,7 @@ export default function CuentasPorPagar() {
     }
   };
 
-  const openPayModal = (po) => {
-    setSelectedPo(po);
-    setFormData({
-      amount:           Math.round(po.balance),
-      payment_date:     new Date().toISOString().split('T')[0],
-      payment_method:   'TRANSFERENCIA',
-      reference_number: '',
-      notes:            '',
-    });
-    setShowModal(true);
-  };
-
-  const handleSubmit = async (e) => {
-    if (e?.preventDefault) e.preventDefault();
-    const payAmount = Number(formData.amount);
-    if (!payAmount || payAmount <= 0) return alert('Ingrese un monto válido.');
-    if (payAmount > selectedPo.balance) return alert(`El monto no puede superar el saldo deudor de $${Math.round(selectedPo.balance).toLocaleString('es-CL')}.`);
-    setSaving(true);
-    try {
-      // Distribuir el pago entre los documentos con saldo, en orden de fecha
-      let remaining = payAmount;
-      const pendingDocs = [...selectedPo.invoices]
-        .filter(d => Number(d.amount || 0) - Number(d.paid_amount || 0) > 0)
-        .sort((a, b) => (a.expense_date || '').localeCompare(b.expense_date || ''));
-
-      for (const doc of pendingDocs) {
-        if (remaining <= 0) break;
-        const docBalance = Number(doc.amount || 0) - Number(doc.paid_amount || 0);
-        const toPay      = Math.min(remaining, docBalance);
-
-        // Insertar pago
-        const { error: payErr } = await supabase.from('supplier_payments').insert([{
-          company_id:       companyId,
-          expense_id:       doc.id,
-          amount:           toPay,
-          payment_date:     formData.payment_date,
-          payment_method:   formData.payment_method,
-          reference_number: formData.reference_number || null,
-          notes:            formData.notes || null,
-          created_by:       userId,
-        }]);
-        if (payErr) throw payErr;
-
-        // Actualizar expense
-        const newPaid   = Number(doc.paid_amount || 0) + toPay;
-        const docTotal  = Number(doc.amount || 0);
-        const newStatus = newPaid >= docTotal ? 'PAID'
-                        : newPaid > 0         ? 'PARTIAL_PAYMENT'
-                        : 'PENDING_PAYMENT';
-
-        const { error: updErr } = await supabase.from('expenses')
-          .update({ paid_amount: newPaid, status: newStatus })
-          .eq('id', doc.id);
-        if (updErr) throw updErr;
-
-        remaining -= toPay;
-      }
-
-      setShowModal(false);
-      fetchData();
-    } catch (err) {
-      alert('Error: ' + err.message);
-    } finally {
-      setSaving(false);
-    }
-  };
+  const openModal = (po) => { setSelectedPo(po); setShowModal(true); };
 
   const totalPending = poList.filter(p => p.status.key !== 'PAID').reduce((s, p) => s + p.balance, 0);
   const totalPaid    = poList.reduce((s, p) => s + p.totalPaid, 0);
@@ -305,7 +259,7 @@ export default function CuentasPorPagar() {
                 {filtered.map((po) => (
                   <tr key={po.id} className={`transition-colors ${po.status.key === 'PAID' ? 'bg-slate-50/40' : 'hover:bg-indigo-50/20'}`}>
                     <td className="px-4 py-2 font-black text-indigo-600 font-mono">
-                      #{String(po.po_number).padStart(4, '0')}
+                      {po.isLogistic ? po.po_number : '#' + String(po.po_number).padStart(4, '0')}
                     </td>
                     <td className="px-4 py-2 font-medium text-slate-800 overflow-hidden text-ellipsis whitespace-nowrap">
                       {supplierName(po)}
@@ -338,22 +292,16 @@ export default function CuentasPorPagar() {
                       </span>
                     </td>
                     <td className="px-4 py-2 text-center">
-                      {po.status.key !== 'PAID' ? (
-                        <button
-                          onClick={() => openPayModal(po)}
-                          style={{ backgroundColor: BRAND_PRIMARY }}
-                          className="text-white px-3 py-1 rounded-sm text-[10px] font-black uppercase hover:opacity-90 transition-all inline-flex items-center gap-1"
-                        >
-                          <CreditCard size={11} /> Registrar Pago
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => openPayModal(po)}
-                          className="text-slate-500 border border-slate-200 bg-white hover:bg-slate-50 px-3 py-1 rounded-sm text-[10px] font-black uppercase transition-all inline-flex items-center gap-1"
-                        >
-                          <FileText size={11} /> Ver Detalle
-                        </button>
-                      )}
+                      <button
+                        onClick={() => openModal(po)}
+                        className={`px-3 py-1 rounded-sm text-[10px] font-black uppercase transition-all inline-flex items-center gap-1 border ${
+                          po.status.key !== 'PAID'
+                            ? 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                            : 'border-slate-200 bg-white text-slate-400 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Eye size={11} /> Ver Detalle
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -374,10 +322,10 @@ export default function CuentasPorPagar() {
                 <CreditCard size={20} style={{ color: BRAND_PRIMARY }} strokeWidth={2.5} />
                 <div>
                   <h3 className="text-sm font-bold text-gray-800 uppercase tracking-tight">
-                    {selectedPo.status.key === 'PAID' ? 'Detalle de Pagos' : 'Registrar Pago'}
+                    Detalle de Documentos
                   </h3>
                   <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mt-0.5">
-                    OC #{String(selectedPo.po_number).padStart(4, '0')} · {supplierName(selectedPo)}
+                    {selectedPo.isLogistic ? selectedPo.po_number : 'OC #' + String(selectedPo.po_number).padStart(4, '0')} · {supplierName(selectedPo)}
                   </p>
                 </div>
               </div>
@@ -386,33 +334,22 @@ export default function CuentasPorPagar() {
               </button>
             </div>
 
-            {/* Toolbar */}
+            {/* Toolbar - solo cerrar */}
             <div className="px-4 py-2 bg-white border-b border-gray-100 flex gap-2 shrink-0">
-              {selectedPo.status.key !== 'PAID' ? (
-                <>
-                  <button
-                    onClick={handleSubmit}
-                    disabled={saving}
-                    style={{ backgroundColor: BRAND_PRIMARY }}
-                    className="text-white px-6 py-1 rounded-sm text-xs font-bold uppercase shadow-sm hover:opacity-90 disabled:opacity-50 transition-all"
-                  >
-                    {saving ? 'Guardando...' : 'Confirmar Pago'}
-                  </button>
-                  <button
-                    onClick={() => setShowModal(false)}
-                    className="bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-1 rounded-sm text-xs font-bold uppercase shadow-sm transition-all"
-                  >
-                    Descartar
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={() => setShowModal(false)}
-                  className="bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-1 rounded-sm text-xs font-bold uppercase shadow-sm transition-all"
-                >
-                  Cerrar
-                </button>
-              )}
+              <button
+                onClick={() => setShowModal(false)}
+                className="bg-white border border-gray-300 text-gray-600 hover:bg-gray-50 px-4 py-1 rounded-sm text-xs font-bold uppercase shadow-sm transition-all"
+              >
+                Cerrar
+              </button>
+            </div>
+
+            {/* Info banner */}
+            <div className="mx-4 mt-4 flex items-start gap-2 bg-blue-50 border border-blue-200 rounded-sm px-3 py-2.5 shrink-0">
+              <Info size={14} className="text-blue-500 mt-0.5 shrink-0" />
+              <p className="text-[11px] text-blue-700 leading-relaxed">
+                <strong>Nota:</strong> El registro de pagos se realiza exclusivamente desde el módulo de Finanzas. Esta vista es de control.
+              </p>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
@@ -490,59 +427,7 @@ export default function CuentasPorPagar() {
               </div>
 
               {selectedPo.status.key !== 'PAID' && (
-              <div className="grid grid-cols-2 gap-x-16 gap-y-4">
-                <div className="space-y-4">
-                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Datos del Pago</p>
-                  <div className="grid grid-cols-3 items-center">
-                    <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">Monto</label>
-                    <input
-                      type="number"
-                      required
-                      min="0.01"
-                      max={selectedPo?.balance}
-                      value={formData.amount}
-                      onChange={(e) => {
-                        const val = Math.min(Number(e.target.value), selectedPo?.balance || 0);
-                        setFormData({ ...formData, amount: val });
-                      }}
-                      className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1 text-sm font-bold focus:border-[#4C3073] focus:ring-1 focus:ring-[#4C3073] outline-none font-mono [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
-                      style={{ color: BRAND_PRIMARY }}
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 items-center">
-                    <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">Fecha Pago</label>
-                    <input
-                      type="date"
-                      required
-                      value={formData.payment_date}
-                      onChange={(e) => setFormData({ ...formData, payment_date: e.target.value })}
-                      className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1 text-sm focus:border-[#4C3073] focus:ring-1 focus:ring-[#4C3073] outline-none"
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 items-center">
-                    <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">Método</label>
-                    <select
-                      value={formData.payment_method}
-                      onChange={(e) => setFormData({ ...formData, payment_method: e.target.value })}
-                      className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1 text-sm focus:border-[#4C3073] focus:ring-1 focus:ring-[#4C3073] outline-none"
-                    >
-                      {PAYMENT_METHODS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-3 items-center">
-                    <label className="text-gray-500 font-bold text-[11px] text-right pr-6 uppercase tracking-tighter">N° Referencia</label>
-                    <input
-                      type="text"
-                      placeholder="N° comprobante..."
-                      value={formData.reference_number}
-                      onChange={(e) => setFormData({ ...formData, reference_number: e.target.value.toUpperCase() })}
-                      className="col-span-2 w-full bg-white border border-gray-300 rounded-sm px-2 py-1 text-sm focus:border-[#4C3073] focus:ring-1 focus:ring-[#4C3073] outline-none font-mono"
-                    />
-                  </div>
-                </div>
-
-                {/* Resumen saldo total */}
-                <div className="bg-gray-50 border border-gray-200 rounded-sm p-4 flex flex-col justify-center gap-3 self-start mt-5">
+                <div className="bg-gray-50 border border-gray-200 rounded-sm p-4 flex flex-col gap-3">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-gray-500 font-bold uppercase tracking-tighter">Total Facturado</span>
                     <span className="font-bold font-mono text-gray-800">${Math.round(selectedPo.totalInvoiced).toLocaleString('es-CL')}</span>
@@ -563,9 +448,7 @@ export default function CuentasPorPagar() {
                       ${Math.round(selectedPo.balance).toLocaleString('es-CL')}
                     </span>
                   </div>
-                  <p className="text-[9px] text-gray-400">El pago se distribuye automáticamente entre los documentos con saldo.</p>
                 </div>
-              </div>
               )}
 
               {/* Resumen solo lectura para órdenes pagadas */}
