@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../api/supabaseClient';
-import { Anchor, ChevronRight, CheckSquare, Square, Calculator, CheckCircle, X, AlertCircle } from 'lucide-react';
+import { Anchor, ChevronRight, CheckSquare, Square, Calculator, CheckCircle, X, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
 
 const BRAND_PRIMARY = '#4C3073';
 const BRAND_ACCENT  = '#8E43D9';
@@ -19,6 +19,7 @@ export default function CostosDestino() {
   const [selectedReceipts, setSelectedReceipts] = useState([]);
   const [receiptSearch, setReceiptSearch]       = useState('');
   const [allocation, setAllocation]             = useState(null);
+  const [expandedRow, setExpandedRow]           = useState(null); // index of expanded preview row
   const [saving, setSaving]                     = useState(false);
   const [successMsg, setSuccessMsg]             = useState('');
 
@@ -127,7 +128,7 @@ export default function CostosDestino() {
   };
 
   /* ── CALCULAR PRORRATEO ─────────────────────────────────── */
-  const calcAllocation = () => {
+  const calcAllocation = async () => {
     if (!selectedInvoice) return alert('Seleccione una factura logística.');
     if (selectedReceipts.length === 0) return alert('Seleccione al menos una recepción.');
 
@@ -138,10 +139,39 @@ export default function CostosDestino() {
 
     const toDistribute = selectedInvoice.remaining;
 
+    // Fetch current cost_price for all products involved
+    const allProductIds = [...new Set(chosen.flatMap(rec => rec.movements.map(m => m.product_id)))];
+    const { data: productData } = await supabase
+      .from('products').select('id, name, cost_price, stock_quantity').in('id', allProductIds);
+    const productMap = Object.fromEntries((productData || []).map(p => [p.id, p]));
+
     const rows = chosen.map(rec => {
       const pct    = rec.value / totalValue;
       const amount = Math.round(pct * toDistribute);
-      return { receipt: rec, pct, amount };
+
+      // Per-product breakdown for preview
+      const products = rec.movements.map(mov => {
+        const item      = rec.poItems.find(i => i.product_id === mov.product_id);
+        const prod      = productMap[mov.product_id];
+        if (!item || !prod) return null;
+        const prodValue = Number(mov.quantity) * Number(item.unit_cost);
+        const prodShare = rec.value > 0 ? Math.round((prodValue / rec.value) * amount) : 0;
+        const currentCost = Number(prod.cost_price || 0);
+        const stock       = Number(prod.stock_quantity || 0);
+        const newCost     = stock > 0
+          ? Math.round(((stock * currentCost) + prodShare) / stock * 100) / 100
+          : currentCost;
+        return {
+          id:          prod.id,
+          name:        prod.name,
+          qty:         Number(mov.quantity),
+          currentCost,
+          prodShare,
+          newCost,
+        };
+      }).filter(Boolean);
+
+      return { receipt: rec, pct, amount, products };
     });
 
     // Ajuste de redondeo al último ítem
@@ -150,6 +180,7 @@ export default function CostosDestino() {
     if (rows.length > 0) rows[rows.length - 1].amount += diff;
 
     setAllocation({ rows, toDistribute, totalValue });
+    setExpandedRow(null);
   };
 
   /* ── APLICAR PRORRATEO ──────────────────────────────────── */
@@ -429,21 +460,58 @@ export default function CostosDestino() {
                   <div className="border border-slate-200 rounded-sm overflow-hidden">
                     <div className="bg-slate-50 px-3 py-1.5 border-b border-slate-100">
                       <p className="text-[10px] font-black uppercase tracking-widest text-slate-500">Pre-visualización</p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Clic para ver detalle por producto</p>
                     </div>
-                    <div className="divide-y divide-slate-50">
+                    <div className="divide-y divide-slate-100">
                       {allocation.rows.map((row, i) => (
-                        <div key={i} className="px-3 py-2">
-                          <div className="flex justify-between items-center">
-                            <p className="text-[10px] font-black text-indigo-700">
-                              OC #{String(row.receipt.po_number || '').padStart(4, '0')}
+                        <div key={i}>
+                          {/* Fila resumen — clickeable */}
+                          <button
+                            onClick={() => setExpandedRow(expandedRow === i ? null : i)}
+                            className="w-full text-left px-3 py-2.5 hover:bg-slate-50 transition-colors"
+                          >
+                            <div className="flex justify-between items-center">
+                              <div className="flex items-center gap-1.5">
+                                {expandedRow === i
+                                  ? <ChevronUp size={11} className="text-slate-400" />
+                                  : <ChevronDown size={11} className="text-slate-400" />}
+                                <p className="text-[10px] font-black" style={{ color: BRAND_PRIMARY }}>
+                                  OC #{String(row.receipt.po_number || '').padStart(4, '0')}
+                                </p>
+                              </div>
+                              <p className="font-black text-xs" style={{ color: BRAND_PRIMARY }}>
+                                ${Math.round(row.amount).toLocaleString('es-CL')}
+                              </p>
+                            </div>
+                            <p className="text-[10px] text-slate-400 pl-4">
+                              {(row.pct * 100).toFixed(1)}% · {row.products.length} producto{row.products.length !== 1 ? 's' : ''}
                             </p>
-                            <p className="font-black text-xs" style={{ color: BRAND_PRIMARY }}>
-                              ${Math.round(row.amount).toLocaleString('es-CL')}
-                            </p>
-                          </div>
-                          <p className="text-[10px] text-slate-400">
-                            {(row.pct * 100).toFixed(1)}% del total
-                          </p>
+                          </button>
+                          {/* Detalle expandible — antes / después por producto */}
+                          {expandedRow === i && (
+                            <div className="bg-purple-50 border-t border-purple-100 px-3 py-2">
+                              <table className="w-full text-[10px] border-collapse">
+                                <thead>
+                                  <tr className="text-slate-500 uppercase tracking-tighter font-bold">
+                                    <th className="text-left pb-1.5 pr-2">Producto</th>
+                                    <th className="text-right pb-1.5 pr-1">Actual</th>
+                                    <th className="text-right pb-1.5 pr-1">+Flete</th>
+                                    <th className="text-right pb-1.5" style={{ color: BRAND_PRIMARY }}>Nuevo</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-purple-100">
+                                  {row.products.map(p => (
+                                    <tr key={p.id}>
+                                      <td className="py-1 pr-2 text-slate-700 font-medium max-w-[90px] overflow-hidden text-ellipsis whitespace-nowrap">{p.name}</td>
+                                      <td className="py-1 pr-1 text-right font-mono text-slate-500">${p.currentCost.toLocaleString('es-CL')}</td>
+                                      <td className="py-1 pr-1 text-right font-mono text-amber-600">+{p.prodShare.toLocaleString('es-CL')}</td>
+                                      <td className="py-1 text-right font-mono font-black" style={{ color: BRAND_PRIMARY }}>${p.newCost.toLocaleString('es-CL')}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -466,7 +534,7 @@ export default function CostosDestino() {
                     {saving ? 'Aplicando...' : '✓ Confirmar y Aplicar'}
                   </button>
                   <button
-                    onClick={() => setAllocation(null)}
+                    onClick={() => { setAllocation(null); setExpandedRow(null); }}
                     className="w-full py-1.5 rounded-sm text-xs font-bold uppercase text-slate-500 border border-slate-200 hover:bg-slate-50 transition-all"
                   >
                     Cancelar
