@@ -15,11 +15,11 @@ export default function CostosDestino() {
   const [receipts, setReceipts]         = useState([]); // inventory_receipts DONE
 
   // Wizard state
-  const [selectedInvoice, setSelectedInvoice]   = useState(null);
+  const [selectedInvoices, setSelectedInvoices] = useState([]); // multi-select LOG-
   const [selectedReceipts, setSelectedReceipts] = useState([]);
   const [receiptSearch, setReceiptSearch]       = useState('');
   const [allocation, setAllocation]             = useState(null);
-  const [expandedRow, setExpandedRow]           = useState(null); // index of expanded preview row
+  const [expandedRow, setExpandedRow]           = useState(null);
   const [saving, setSaving]                     = useState(false);
   const [successMsg, setSuccessMsg]             = useState('');
 
@@ -129,15 +129,14 @@ export default function CostosDestino() {
 
   /* ── CALCULAR PRORRATEO ─────────────────────────────────── */
   const calcAllocation = async () => {
-    if (!selectedInvoice) return alert('Seleccione una factura logística.');
+    if (selectedInvoices.length === 0) return alert('Seleccione al menos una factura logística.');
     if (selectedReceipts.length === 0) return alert('Seleccione al menos una recepción.');
 
-    const chosen = receipts.filter(r => selectedReceipts.includes(r.id));
+    const chosen     = receipts.filter(r => selectedReceipts.includes(r.id));
     const totalValue = chosen.reduce((s, r) => s + r.value, 0);
-
     if (totalValue === 0) return alert('Las recepciones seleccionadas no tienen valor calculable. Verifica los costos de la OC.');
 
-    const toDistribute = selectedInvoice.remaining;
+    const toDistribute = selectedInvoices.reduce((s, inv) => s + inv.remaining, 0);
 
     // Fetch current cost_price for all products involved
     const allProductIds = [...new Set(chosen.flatMap(rec => rec.movements.map(m => m.product_id)))];
@@ -149,34 +148,25 @@ export default function CostosDestino() {
       const pct    = rec.value / totalValue;
       const amount = Math.round(pct * toDistribute);
 
-      // Per-product breakdown for preview
       const products = rec.movements.map(mov => {
         const item      = rec.poItems.find(i => i.product_id === mov.product_id);
         const prod      = productMap[mov.product_id];
         if (!item || !prod) return null;
-        const prodValue = Number(mov.quantity) * Number(item.unit_cost);
-        const prodShare = rec.value > 0 ? Math.round((prodValue / rec.value) * amount) : 0;
+        const prodValue   = Number(mov.quantity) * Number(item.unit_cost);
+        const prodShare   = rec.value > 0 ? Math.round((prodValue / rec.value) * amount) : 0;
         const currentCost = Number(prod.cost_price || 0);
         const stock       = Number(prod.stock_quantity || 0);
         const newCost     = stock > 0
           ? Math.round(((stock * currentCost) + prodShare) / stock * 100) / 100
           : currentCost;
-        return {
-          id:          prod.id,
-          name:        prod.name,
-          qty:         Number(mov.quantity),
-          currentCost,
-          prodShare,
-          newCost,
-        };
+        return { id: prod.id, name: prod.name, qty: Number(mov.quantity), currentCost, prodShare, newCost };
       }).filter(Boolean);
 
       return { receipt: rec, pct, amount, products };
     });
 
     // Ajuste de redondeo al último ítem
-    const sumRounded = rows.reduce((s, r) => s + r.amount, 0);
-    const diff = Math.round(toDistribute) - sumRounded;
+    const diff = Math.round(toDistribute) - rows.reduce((s, r) => s + r.amount, 0);
     if (rows.length > 0) rows[rows.length - 1].amount += diff;
 
     setAllocation({ rows, toDistribute, totalValue });
@@ -188,52 +178,55 @@ export default function CostosDestino() {
     if (!allocation) return;
     setSaving(true);
     try {
+      const totalDistributed = selectedInvoices.reduce((s, inv) => s + inv.remaining, 0);
+
       for (const row of allocation.rows) {
         const { receipt, amount } = row;
         if (amount <= 0) continue;
 
-        // 1. Insertar en landed_cost_allocations
-        const { error: lcaErr } = await supabase.from('landed_cost_allocations').insert([{
-          company_id:       companyId,
-          expense_id:       selectedInvoice.id,
-          receipt_id:       receipt.id,
-          allocated_amount: amount,
-          created_by:       userId,
-        }]);
-        if (lcaErr) throw lcaErr;
+        // 1. Insertar en landed_cost_allocations — un registro por cada (factura, recepción)
+        //    Cada factura aporta su proporción del monto asignado a esta recepción
+        for (const inv of selectedInvoices) {
+          const invShare = totalDistributed > 0
+            ? Math.round((inv.remaining / totalDistributed) * amount)
+            : 0;
+          if (invShare <= 0) continue;
+          const { error: lcaErr } = await supabase.from('landed_cost_allocations').insert([{
+            company_id:       companyId,
+            expense_id:       inv.id,
+            receipt_id:       receipt.id,
+            allocated_amount: invShare,
+            created_by:       userId,
+          }]);
+          if (lcaErr) throw lcaErr;
+        }
 
-        // 2. Prorratear el flete entre los productos de esta recepción
+        // 2. Actualizar cost_price de cada producto de esta recepción
         const recValue = receipt.value;
         for (const mov of receipt.movements) {
-          const item      = receipt.poItems.find(i => i.product_id === mov.product_id);
+          const item     = receipt.poItems.find(i => i.product_id === mov.product_id);
           if (!item) continue;
           const prodValue = Number(mov.quantity) * Number(item.unit_cost);
           const prodShare = recValue > 0 ? (prodValue / recValue) * amount : 0;
           if (prodShare <= 0) continue;
 
-          // 3. Obtener stock y cost_price actuales
           const { data: prod } = await supabase
-            .from('products')
-            .select('id, stock_quantity, cost_price')
-            .eq('id', mov.product_id)
-            .single();
-
+            .from('products').select('id, stock_quantity, cost_price')
+            .eq('id', mov.product_id).single();
           if (!prod || Number(prod.stock_quantity) <= 0) continue;
 
-          // 4. Actualizar costo promedio ponderado
           const currentStock = Number(prod.stock_quantity);
-          const currentCost  = Number(prod.cost_price || 0);
-          const newCost      = ((currentStock * currentCost) + prodShare) / currentStock;
-
+          const newCost      = ((currentStock * Number(prod.cost_price || 0)) + prodShare) / currentStock;
           await supabase.from('products')
             .update({ cost_price: Math.round(newCost * 100) / 100 })
             .eq('id', prod.id);
         }
       }
 
-      setSuccessMsg(`✓ Prorrateo aplicado correctamente. $${Math.round(selectedInvoice.remaining).toLocaleString('es-CL')} distribuidos entre ${allocation.rows.length} recepción(es).`);
+      const total = selectedInvoices.reduce((s, i) => s + i.remaining, 0);
+      setSuccessMsg(`✓ Prorrateo aplicado. $${Math.round(total).toLocaleString('es-CL')} de ${selectedInvoices.length} factura(s) distribuidos entre ${allocation.rows.length} recepción(es).`);
       setAllocation(null);
-      setSelectedInvoice(null);
+      setSelectedInvoices([]);
       setSelectedReceipts([]);
       fetchData();
     } catch (err) {
@@ -278,9 +271,19 @@ export default function CostosDestino() {
         {/* ── SECCIÓN A: Origen ── (col 1-4) */}
         <div className="col-span-4 flex flex-col gap-3">
           <div className="bg-white border border-slate-200 rounded-sm overflow-hidden flex flex-col">
-            <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50">
-              <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">A · Factura Logística</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">Selecciona el gasto a distribuir</p>
+            <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+              <div>
+                <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">A · Factura Logística</p>
+                <p className="text-[11px] text-slate-400 mt-0.5">{selectedInvoices.length} seleccionada{selectedInvoices.length !== 1 ? 's' : ''}</p>
+              </div>
+              {selectedInvoices.length > 0 && (
+                <button
+                  onClick={() => { setSelectedInvoices([]); setAllocation(null); setSelectedReceipts([]); }}
+                  className="text-[10px] text-slate-400 hover:text-slate-600 uppercase font-bold tracking-widest"
+                >
+                  Limpiar
+                </button>
+              )}
             </div>
             <div className="flex-1 overflow-auto divide-y divide-slate-50">
               {logInvoices.length === 0 ? (
@@ -290,15 +293,25 @@ export default function CostosDestino() {
                   <p className="text-[11px] mt-1">Ingresa una Factura Logística primero</p>
                 </div>
               ) : logInvoices.map(inv => {
-                const isSelected = selectedInvoice?.id === inv.id;
+                const isSelected = selectedInvoices.some(i => i.id === inv.id);
                 return (
                   <button
                     key={inv.id}
-                    onClick={() => { setSelectedInvoice(isSelected ? null : inv); setAllocation(null); setSelectedReceipts([]); }}
-                    className={`w-full text-left px-4 py-3 transition-colors ${isSelected ? 'bg-purple-50 border-l-2' : 'hover:bg-slate-50 border-l-2 border-transparent'}`}
+                    onClick={() => {
+                      setSelectedInvoices(prev =>
+                        isSelected ? prev.filter(i => i.id !== inv.id) : [...prev, inv]
+                      );
+                      setAllocation(null);
+                    }}
+                    className={`w-full text-left px-4 py-3 transition-colors flex gap-3 items-start ${isSelected ? 'bg-purple-50 border-l-2' : 'hover:bg-slate-50 border-l-2 border-transparent'}`}
                     style={isSelected ? { borderLeftColor: BRAND_PRIMARY } : {}}
                   >
-                    <div className="flex justify-between items-start">
+                    <div className="mt-0.5 shrink-0">
+                      {isSelected
+                        ? <CheckSquare size={14} style={{ color: BRAND_PRIMARY }} />
+                        : <Square size={14} className="text-slate-300" />}
+                    </div>
+                    <div className="flex-1 flex justify-between items-start">
                       <div>
                         <p className="font-black text-xs" style={{ color: BRAND_PRIMARY }}>{inv.internal_id}</p>
                         <p className="text-[11px] text-slate-600 mt-0.5">{inv.supplier_name}</p>
@@ -308,7 +321,7 @@ export default function CostosDestino() {
                         <p className="font-black text-xs text-slate-800">${Number(inv.amount).toLocaleString('es-CL')}</p>
                         {inv.allocated > 0 && (
                           <p className="text-[10px] text-orange-500 font-bold">
-                            -${Math.round(inv.allocated).toLocaleString('es-CL')} asig.
+                            -{Math.round(inv.allocated).toLocaleString('es-CL')} asig.
                           </p>
                         )}
                         <p className="text-[10px] font-black" style={{ color: BRAND_PRIMARY }}>
@@ -320,12 +333,21 @@ export default function CostosDestino() {
                 );
               })}
             </div>
+            {/* Total seleccionado */}
+            {selectedInvoices.length > 1 && (
+              <div className="border-t border-slate-100 px-4 py-2 bg-purple-50 flex justify-between items-center">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-500">Total a distribuir</span>
+                <span className="font-black text-sm" style={{ color: BRAND_PRIMARY }}>
+                  ${selectedInvoices.reduce((s, i) => s + i.remaining, 0).toLocaleString('es-CL')}
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
         {/* ── SECCIÓN B: Recepciones ── (col 5-9) */}
         <div className="col-span-5 flex flex-col gap-3">
-          <div className={`bg-white border rounded-sm overflow-hidden flex flex-col transition-opacity ${!selectedInvoice ? 'border-slate-100 opacity-50 pointer-events-none' : 'border-slate-200'}`}>
+          <div className={`bg-white border rounded-sm overflow-hidden flex flex-col transition-opacity ${selectedInvoices.length === 0 ? 'border-slate-100 opacity-50 pointer-events-none' : 'border-slate-200'}`}>
             <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex flex-col gap-2">
               <div className="flex justify-between items-center">
                 <div>
@@ -419,7 +441,7 @@ export default function CostosDestino() {
 
         {/* ── SECCIÓN C: Cálculo ── (col 10-12) */}
         <div className="col-span-3 flex flex-col gap-3">
-          <div className={`bg-white border rounded-sm overflow-hidden flex flex-col transition-opacity ${!selectedInvoice ? 'border-slate-100 opacity-50 pointer-events-none' : 'border-slate-200'}`}>
+          <div className={`bg-white border rounded-sm overflow-hidden flex flex-col transition-opacity ${selectedInvoices.length === 0 ? 'border-slate-100 opacity-50 pointer-events-none' : 'border-slate-200'}`}>
             <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50">
               <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">C · Distribución</p>
               <p className="text-[11px] text-slate-400 mt-0.5">Prorrateo por valor</p>
@@ -429,9 +451,9 @@ export default function CostosDestino() {
               {/* Botón calcular */}
               <button
                 onClick={calcAllocation}
-                disabled={!selectedInvoice || selectedReceipts.length === 0}
+                disabled={selectedInvoices.length === 0 || selectedReceipts.length === 0}
                 className="w-full flex items-center justify-center gap-2 py-2 rounded-sm text-xs font-bold uppercase transition-all disabled:opacity-40 disabled:cursor-not-allowed border"
-                style={selectedInvoice && selectedReceipts.length > 0
+                style={selectedInvoices.length > 0 && selectedReceipts.length > 0
                   ? { backgroundColor: BRAND_PRIMARY, color: 'white', borderColor: BRAND_PRIMARY }
                   : { borderColor: '#d1d5db', color: '#9ca3af' }}
               >
@@ -439,16 +461,25 @@ export default function CostosDestino() {
                 Calcular Prorrateo
               </button>
 
-              {/* Resumen factura seleccionada */}
-              {selectedInvoice && (
+              {/* Resumen facturas seleccionadas */}
+              {selectedInvoices.length > 0 && (
                 <div className="bg-purple-50 border border-purple-100 rounded-sm p-3 space-y-1.5">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-purple-400">Factura seleccionada</p>
-                  <p className="font-black text-sm" style={{ color: BRAND_PRIMARY }}>{selectedInvoice.internal_id}</p>
-                  <p className="text-[11px] text-slate-600">{selectedInvoice.supplier_name}</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-purple-400">
+                    {selectedInvoices.length === 1 ? 'Factura seleccionada' : `${selectedInvoices.length} Facturas seleccionadas`}
+                  </p>
+                  {selectedInvoices.map(inv => (
+                    <div key={inv.id} className="flex justify-between items-center">
+                      <div>
+                        <span className="font-black text-xs" style={{ color: BRAND_PRIMARY }}>{inv.internal_id}</span>
+                        <span className="text-[10px] text-slate-500 ml-1">{inv.supplier_name}</span>
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-700">${Math.round(inv.remaining).toLocaleString('es-CL')}</span>
+                    </div>
+                  ))}
                   <div className="border-t border-purple-100 pt-1.5 flex justify-between">
-                    <span className="text-[10px] text-slate-500 uppercase font-bold">A distribuir</span>
+                    <span className="text-[10px] text-slate-500 uppercase font-bold">Total a distribuir</span>
                     <span className="font-black text-sm" style={{ color: BRAND_PRIMARY }}>
-                      ${Math.round(selectedInvoice.remaining).toLocaleString('es-CL')}
+                      ${selectedInvoices.reduce((s, i) => s + i.remaining, 0).toLocaleString('es-CL')}
                     </span>
                   </div>
                 </div>
