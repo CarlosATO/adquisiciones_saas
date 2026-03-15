@@ -592,6 +592,8 @@ export default function CuentasPorPagar() {
                   ) : null}
                 </div>
               )}
+
+              {selectedPo.status.key !== 'PAID' && (
                 <div className="bg-gray-50 border border-gray-200 rounded-sm p-4 flex flex-col gap-3">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-gray-500 font-bold uppercase tracking-tighter">Total Facturado</span>
