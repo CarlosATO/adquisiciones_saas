@@ -198,7 +198,17 @@ export default function Facturacion() {
     if (!logFormData.amount || isNaN(Number(logFormData.amount))) return alert('Ingrese un monto válido.');
     setSaving(true);
     try {
-      const internalId = 'LOG-' + Date.now().toString().slice(-6);
+      // Correlativo por empresa: buscar el mayor número LOG- existente
+      const { data: existing } = await supabase
+        .from('expenses')
+        .select('internal_id')
+        .eq('company_id', companyId)
+        .like('internal_id', 'LOG-%');
+      const maxNum = (existing || []).reduce((max, e) => {
+        const n = parseInt((e.internal_id || '').replace('LOG-', ''), 10);
+        return isNaN(n) ? max : Math.max(max, n);
+      }, 0);
+      const internalId = 'LOG-' + String(maxNum + 1).padStart(4, '0');
       const supplier   = allSuppliers.find(s => s.id === logFormData.supplier_id);
       const newExp = {
         company_id:      companyId,
