@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { supabase } from './api/supabaseClient'
 
@@ -9,10 +9,12 @@ const PrivateRoute = ({ children }) => {
   const [isProcessingToken, setIsProcessingToken] = useState(
     window.location.hash.includes('access_token')
   );
+  const hasProcessed = useRef(false);
 
   useEffect(() => {
     const processToken = async () => {
-      if (isProcessingToken) {
+      if (isProcessingToken && !hasProcessed.current) {
+        hasProcessed.current = true;
         try {
           const hash = window.location.hash.substring(1);
           const params = new URLSearchParams(hash);
@@ -20,8 +22,11 @@ const PrivateRoute = ({ children }) => {
           const refresh_token = params.get('refresh_token');
 
           if (access_token && refresh_token) {
-            await supabase.auth.setSession({ access_token, refresh_token });
+            // Limpiamos el hash inmediatamente para evitar re-procesamiento
             window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            
+            const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+            if (error) throw error;
           }
         } catch (err) {
           console.error("Error en SSO:", err);
@@ -29,7 +34,7 @@ const PrivateRoute = ({ children }) => {
           setIsProcessingToken(false);
           checkAuth();
         }
-      } else {
+      } else if (!isProcessingToken) {
         checkAuth();
       }
     };

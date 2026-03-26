@@ -150,21 +150,21 @@ export default function AdquisicionesDashboard() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[calc(100vh-64px)] bg-slate-50">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+      <div className="flex items-center justify-center h-[calc(100vh-64px)]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col min-h-[calc(100vh-64px)] bg-slate-50 font-sans text-slate-800">
+    <div className="flex flex-col min-h-[calc(100vh-64px)] font-sans text-white/90">
 
       {/* ── CONTROL PANEL ── */}
-      <div className="border-b border-slate-300 px-6 py-2 bg-white shadow-sm flex items-center justify-between">
-        <nav className="flex items-center text-[11px] text-slate-500 uppercase tracking-widest font-medium gap-1">
-          <span className="text-slate-400">Compras</span>
-          <ChevronRight size={11} className="text-slate-300" />
-          <span className="text-slate-900 font-black">Tablero</span>
+      <div className="border-b border-white/5 px-6 py-2 bg-white/5 shadow-xl flex items-center justify-between backdrop-blur-md">
+        <nav className="flex items-center text-[11px] text-white/50 uppercase tracking-widest font-medium gap-1">
+          <span className="text-white/40">Compras</span>
+          <ChevronRight size={11} className="text-white/20" />
+          <span className="text-white font-black">Tablero</span>
         </nav>
         <button
           onClick={() => navigate('/ordenes')}
@@ -211,46 +211,46 @@ export default function AdquisicionesDashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
 
           {/* Gasto del Mes */}
-          <div className="bg-white border border-slate-200 rounded-sm p-5 shadow-sm">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-5 shadow-xl backdrop-blur-sm">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Gasto del Mes</span>
-              <div className="w-8 h-8 rounded-sm bg-indigo-50 border border-indigo-100 flex items-center justify-center">
-                <BarChart2 size={16} className="text-indigo-600" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Gasto del Mes</span>
+              <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
+                <BarChart2 size={16} className="text-indigo-300" />
               </div>
             </div>
-            <div className="text-2xl font-black text-indigo-700 font-mono">{fmt(gastoMes)}</div>
+            <div className="text-2xl font-black text-indigo-300 font-mono">{fmt(gastoMes)}</div>
             {notasCredito > 0 && (
-              <div className="mt-1 text-[10px] text-red-500 font-bold font-mono">
+              <div className="mt-1 text-[10px] text-red-300 font-bold font-mono">
                 — NC: {fmt(notasCredito)} descontado
               </div>
             )}
-            <div className="mt-2 text-[10px] text-slate-400 uppercase tracking-widest">Mes en curso · facturas recibidas</div>
+            <div className="mt-2 text-[10px] text-white/30 uppercase tracking-widest leading-tight">Mes en curso · facturas recibidas</div>
           </div>
 
           {/* Saldo por Pagar */}
-          <div className="bg-white border border-slate-200 rounded-sm p-5 shadow-sm">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-5 shadow-xl backdrop-blur-sm">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Saldo por Pagar</span>
-              <div className={`w-8 h-8 rounded-sm flex items-center justify-center ${saldoPagar > 0 ? 'bg-red-50 border border-red-100' : 'bg-green-50 border border-green-100'}`}>
-                <AlertCircle size={16} className={saldoPagar > 0 ? 'text-red-500' : 'text-green-600'} />
+              <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Saldo por Pagar</span>
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${saldoPagar > 0 ? 'bg-red-500/10 border border-red-500/20' : 'bg-green-500/10 border border-green-500/20'}`}>
+                <AlertCircle size={16} className={saldoPagar > 0 ? 'text-red-300' : 'text-green-300'} />
               </div>
             </div>
-            <div className={`text-2xl font-black font-mono ${saldoPagar > 0 ? 'text-red-600' : 'text-green-600'}`}>
+            <div className={`text-2xl font-black font-mono ${saldoPagar > 0 ? 'text-red-300' : 'text-green-300'}`}>
               {fmt(saldoPagar)}
             </div>
-            <div className="mt-2 text-[10px] text-slate-400 uppercase tracking-widest">Deuda acumulada pendiente</div>
+            <div className="mt-2 text-[10px] text-white/30 uppercase tracking-widest">Deuda acumulada pendiente</div>
           </div>
 
           {/* Órdenes en Curso */}
-          <div className="bg-white border border-slate-200 rounded-sm p-5 shadow-sm">
+          <div className="bg-white/5 border border-white/10 rounded-xl p-5 shadow-xl backdrop-blur-sm">
             <div className="flex items-center justify-between mb-3">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Órdenes en Curso</span>
-              <div className="w-8 h-8 rounded-sm bg-amber-50 border border-amber-100 flex items-center justify-center">
-                <ShoppingCart size={16} className="text-amber-600" />
+              <span className="text-[10px] font-black uppercase tracking-widest text-white/40">Órdenes en Curso</span>
+              <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+                <ShoppingCart size={16} className="text-amber-300" />
               </div>
             </div>
-            <div className="text-2xl font-black text-amber-600 font-mono">{ordenesEnCurso}</div>
-            <div className="mt-2 text-[10px] text-slate-400 uppercase tracking-widest">Pendientes + recibidas parcial</div>
+            <div className="text-2xl font-black text-amber-300 font-mono">{ordenesEnCurso}</div>
+            <div className="mt-2 text-[10px] text-white/30 uppercase tracking-widest">Pendientes + recibidas parcial</div>
           </div>
         </div>
 
@@ -258,10 +258,10 @@ export default function AdquisicionesDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
           {/* Top Proveedores */}
-          <div className="bg-white border border-slate-200 rounded-sm shadow-sm">
-            <div className="px-5 py-3 border-b border-slate-100 flex items-center gap-2">
+          <div className="bg-white/5 border border-white/10 rounded-xl shadow-xl backdrop-blur-sm">
+            <div className="px-5 py-3 border-b border-white/5 flex items-center gap-2">
               <TrendingDown size={14} className="text-indigo-400" />
-              <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Top Proveedores · Mes Actual</h2>
+              <h2 className="text-[10px] font-black uppercase tracking-widest text-white/60">Top Proveedores · Mes Actual</h2>
             </div>
             <div className="px-5 py-4 space-y-4">
               {topProveedores.length === 0 ? (
@@ -274,12 +274,12 @@ export default function AdquisicionesDashboard() {
                 return (
                   <div key={idx}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold text-slate-700 truncate max-w-[60%]">{name}</span>
-                      <span className="text-xs font-mono font-black text-indigo-700">{fmt(item.total)}</span>
+                      <span className="text-xs font-bold text-white/80 truncate max-w-[60%]">{name}</span>
+                      <span className="text-xs font-mono font-black text-indigo-300">{fmt(item.total)}</span>
                     </div>
-                    <div className="w-full bg-indigo-50 rounded-full h-2">
+                    <div className="w-full bg-white/5 rounded-full h-2">
                       <div
-                        className="bg-indigo-500 h-2 rounded-full transition-all duration-500"
+                        className="bg-indigo-500 h-2 rounded-full transition-all duration-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
@@ -290,15 +290,15 @@ export default function AdquisicionesDashboard() {
           </div>
 
           {/* Actividad Reciente */}
-          <div className="bg-white border border-slate-200 rounded-sm shadow-sm">
-            <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div className="bg-white/5 border border-white/10 rounded-xl shadow-xl backdrop-blur-sm">
+            <div className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Clock size={14} className="text-slate-400" />
-                <h2 className="text-[10px] font-black uppercase tracking-widest text-slate-600">Actividad Reciente</h2>
+                <Clock size={14} className="text-white/40" />
+                <h2 className="text-[10px] font-black uppercase tracking-widest text-white/60">Actividad Reciente</h2>
               </div>
               <button
                 onClick={() => navigate('/ordenes')}
-                className="text-[10px] font-bold text-indigo-600 hover:underline uppercase tracking-widest"
+                className="text-[10px] font-bold text-indigo-300 hover:underline uppercase tracking-widest transition-all"
               >
                 Ver todas →
               </button>
@@ -311,7 +311,7 @@ export default function AdquisicionesDashboard() {
               ) : (
                 <table className="w-full text-[11px] border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-100 bg-slate-50 text-[9px] uppercase tracking-wider text-slate-500 font-black">
+                    <tr className="border-b border-white/5 bg-white/5 text-[9px] uppercase tracking-wider text-white/40 font-black">
                       <th className="px-4 py-2 text-left">Ref.</th>
                       <th className="px-4 py-2 text-left">Proveedor</th>
                       <th className="px-4 py-2 text-left">Fecha</th>
@@ -319,30 +319,30 @@ export default function AdquisicionesDashboard() {
                       <th className="px-4 py-2 text-right">Total</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-50">
+                  <tbody className="divide-y divide-white/5">
                     {ultimasOrdenes.map(o => {
                       const st = STATUS_MAP[o.status] || STATUS_MAP.DRAFT;
                       return (
                         <tr
                           key={o.id}
                           onClick={() => navigate('/ordenes')}
-                          className="hover:bg-indigo-50/30 cursor-pointer transition-colors"
+                          className="hover:bg-white/5 cursor-pointer transition-colors"
                         >
-                          <td className="px-4 py-2.5 font-mono font-black text-indigo-700">
+                          <td className="px-4 py-2.5 font-mono font-black text-indigo-300">
                             #{String(o.po_number).padStart(4, '0')}
                           </td>
-                          <td className="px-4 py-2.5 text-slate-600 max-w-[120px] truncate">
+                          <td className="px-4 py-2.5 text-white/70 max-w-[120px] truncate">
                             {o.suppliers?.business_name || o.suppliers?.name || '—'}
                           </td>
-                          <td className="px-4 py-2.5 text-slate-400 font-mono">
+                          <td className="px-4 py-2.5 text-white/40 font-mono">
                             {o.issue_date?.split('T')[0] || '—'}
                           </td>
                           <td className="px-4 py-2.5 text-center">
-                            <span className={`inline-flex px-1.5 py-0.5 rounded-sm text-[9px] font-black border uppercase ${st.color}`}>
+                            <span className={`inline-flex px-1.5 py-0.5 rounded-sm text-[9px] font-black border uppercase shadow-sm ${st.color.replace('bg-indigo-50', 'bg-indigo-500/10').replace('text-indigo-600', 'text-indigo-300').replace('border-indigo-200', 'border-indigo-500/20')}`}>
                               {st.label}
                             </span>
                           </td>
-                          <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-700">
+                          <td className="px-4 py-2.5 text-right font-mono font-bold text-white/90">
                             {o.total_amount ? fmt(o.total_amount) : '—'}
                           </td>
                         </tr>
@@ -358,20 +358,20 @@ export default function AdquisicionesDashboard() {
         {/* ── FILA 3: ACCESOS RÁPIDOS ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
-            { label: 'Órdenes de Compra', icon: ShoppingCart, to: '/ordenes', color: 'text-indigo-600 bg-indigo-50 border-indigo-100' },
-            { label: 'Proveedores',        icon: Package,      to: '/proveedores', color: 'text-blue-600 bg-blue-50 border-blue-100' },
-            { label: 'Facturación',        icon: FileText,     to: '/facturacion', color: 'text-green-600 bg-green-50 border-green-100' },
-            { label: 'Cuentas por Pagar',  icon: AlertCircle,  to: '/cuentas-por-pagar', color: 'text-red-600 bg-red-50 border-red-100' },
+            { label: 'Órdenes de Compra', icon: ShoppingCart, to: '/ordenes', color: 'text-indigo-300 bg-indigo-500/10 border-indigo-500/20' },
+            { label: 'Proveedores',        icon: Package,      to: '/proveedores', color: 'text-blue-300 bg-blue-500/10 border-blue-500/20' },
+            { label: 'Facturación',        icon: FileText,     to: '/facturacion', color: 'text-green-300 bg-green-500/10 border-green-500/20' },
+            { label: 'Cuentas por Pagar',  icon: AlertCircle,  to: '/cuentas-por-pagar', color: 'text-red-300 bg-red-500/10 border-red-500/20' },
           ].map(({ label, icon: Icon, to, color }) => (
             <button
               key={to}
               onClick={() => navigate(to)}
-              className={`bg-white border rounded-sm p-4 flex flex-col items-center gap-2 text-center hover:shadow-md transition-shadow group`}
+              className={`bg-white/5 border border-white/10 rounded-xl p-4 flex flex-col items-center gap-2 text-center hover:bg-white/10 hover:shadow-2xl transition-all group backdrop-blur-sm`}
             >
-              <div className={`w-9 h-9 rounded-sm border flex items-center justify-center ${color}`}>
+              <div className={`w-9 h-9 rounded-lg border flex items-center justify-center ${color}`}>
                 <Icon size={17} />
               </div>
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 group-hover:text-slate-700 transition">{label}</span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-white/40 group-hover:text-white transition">{label}</span>
             </button>
           ))}
         </div>

@@ -114,84 +114,86 @@ export default function MainLayout({ children }) {
     const currentTab = tabs.find(t => t.id === activeTabId) || tabs.find(t => t.id === 'adquisiciones');
 
     return (
-        <div className="flex flex-col h-screen bg-white font-sans text-gray-800 text-sm overflow-hidden">
+        <div className="flex flex-col h-screen font-sans text-white/90 text-[13px] overflow-hidden" style={{ backgroundColor: '#45316D' }}>
             
-            {/* Top Bar with Inline Hex Fallback */}
             <header 
-              style={{ backgroundColor: BRAND_PRIMARY }}
-              className="flex h-10 shrink-0 items-center justify-between px-4 text-white z-[100] shadow-md"
+              style={{ backgroundColor: '#5B4385' }}
+              className="flex h-12 shrink-0 items-center justify-between px-4 text-white z-[100] shadow-xl border-b border-white/5"
             >
-                <div className="flex items-center gap-2">
-                    <button 
-                        onClick={() => setShowAppDrawer(!showAppDrawer)}
-                        className={`flex h-8 w-8 items-center justify-center rounded-sm hover:bg-white/10 transition-colors ${showAppDrawer ? 'bg-white/20' : ''}`}
+                <div className="flex items-center gap-6 h-full overflow-x-auto no-scrollbar">
+                    {/* Brand / Logo Area */}
+                    <div 
+                        onClick={() => navigate('/')}
+                        className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity whitespace-nowrap"
                     >
-                        <Grip size={18} />
-                    </button>
-                    <div className="h-4 w-px bg-white/20 mx-1"></div>
-                    <span className="font-bold tracking-tight uppercase text-[12px]">{currentTab?.label || 'Adquisiciones'}</span>
+                        <span className="font-black tracking-tight text-white flex items-center gap-1.5 uppercase text-sm">
+                            <span className="bg-white text-[#5B4385] px-1.5 py-0.5 rounded text-[10px] font-black">DX</span>
+                            Adquisiciones
+                        </span>
+                    </div>
+
+                    <div className="h-6 w-px bg-white/10 mx-1 hidden md:block"></div>
+
+                    {/* Navigation Links (ERP Style) */}
+                    <nav className="flex items-center gap-0.5 h-full">
+                        {tabs.flatMap(t => t.items).filter(item => item.to !== '/').map(item => {
+                            const isActive = location.pathname === item.to || location.pathname.startsWith(item.to);
+                            return (
+                                <button
+                                    key={item.to}
+                                    onClick={() => navigate(item.to)}
+                                    className={`px-3 flex items-center h-full transition-all border-b-2 whitespace-nowrap text-[12px] font-medium
+                                        ${isActive 
+                                            ? 'bg-white/10 border-white text-white' 
+                                            : 'border-transparent text-white/70 hover:bg-white/5 hover:text-white'
+                                        }`}
+                                >
+                                    {item.label}
+                                </button>
+                            );
+                        })}
+                    </nav>
                 </div>
 
-                <div className="flex items-center gap-4">
-                    <div className="hidden md:flex items-center gap-4 text-white/80">
-                        <button className="hover:text-white"><Bell size={16} /></button>
-                        <button className="hover:text-white"><HelpCircle size={16} /></button>
+                <div className="flex items-center gap-3">
+                    <div className="hidden lg:flex items-center gap-3 text-white/60 mr-2">
+                        <button className="hover:text-white transition-colors p-1.5 rounded-full hover:bg-white/10"><Bell size={16} /></button>
+                        <button className="hover:text-white transition-colors p-1.5 rounded-full hover:bg-white/10"><HelpCircle size={16} /></button>
                     </div>
-                    <div className="flex items-center gap-2 ml-2 cursor-pointer hover:bg-white/10 px-2 py-1 rounded-sm transition-colors group relative">
-                        <span className="text-[11px] font-medium hidden sm:block">{userName}</span>
-                        <div className="h-6 w-6 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold border border-white/30">
+                    
+                    <div className="flex items-center gap-3 ml-2 cursor-pointer hover:bg-white/10 px-3 py-1.5 rounded-md transition-all group relative">
+                        <div className="flex flex-col items-end hidden sm:flex">
+                            <span className="text-[11px] font-bold leading-none">{userName}</span>
+                            <span className="text-[9px] text-white/50 uppercase tracking-tighter">{userRole?.toLowerCase()}</span>
+                        </div>
+                        <div className="h-8 w-8 rounded-full bg-white/10 flex items-center justify-center text-[11px] font-bold border border-white/20 shadow-inner group-hover:scale-105 transition-transform">
                             {userName.substring(0, 2)}
                         </div>
-                        <div className="absolute right-0 top-full w-48 pt-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity z-[110]">
-                            <div className="bg-white text-gray-800 shadow-xl border border-gray-200 rounded-sm py-1">
-                            <div className="px-4 py-2 border-b border-gray-100">
-                                <p className="font-bold text-xs">{companyName}</p>
-                                <p className="text-[10px] text-gray-400 capitalize">{userRole?.toLowerCase()}</p>
-                            </div>
-                            <button onClick={() => window.location.href = 'http://localhost:3000/portal'} className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center gap-2 text-xs">
-                                <LogOut size={14} /> Volver al Portal
-                            </button>
+                        
+                        {/* Dropdown Menu */}
+                        <div className="absolute right-0 top-full w-56 pt-2 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all transform group-hover:translate-y-0 translate-y-2 z-[110]">
+                            <div className="bg-[#5B4385] text-white shadow-2xl border border-white/10 rounded-lg py-2 overflow-hidden backdrop-blur-xl">
+                                <div className="px-4 py-3 border-b border-white/10 bg-white/5">
+                                    <p className="font-bold text-xs truncate">{companyName}</p>
+                                    <p className="text-[10px] text-white/50">{userRole}</p>
+                                </div>
+                                <div className="py-1">
+                                    <button 
+                                        onClick={() => window.location.href = 'http://localhost:3000/portal'} 
+                                        className="w-full text-left px-4 py-2.5 hover:bg-white/10 flex items-center gap-3 text-xs transition-colors"
+                                    >
+                                        <LogOut size={14} className="opacity-70" /> 
+                                        <span>Volver al Portal Datix</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </header>
 
-            {/* App Drawer Overlay */}
-            {showAppDrawer && (
-                <div 
-                  style={{ backgroundColor: `${BRAND_PRIMARY}f2` }}
-                  className="fixed inset-0 top-10 z-[90] backdrop-blur-md animate-in fade-in duration-200"
-                >
-                    <div className="p-12 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-8 max-w-6xl mx-auto">
-                        {tabs.flatMap(t => t.items).filter(item => item.to !== '/').map(item => {
-                            const Icon = item.icon;
-                            const isActive = item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to);
-                            return (
-                                <button 
-                                    key={item.to}
-                                    onClick={() => { 
-                                        navigate(item.to);
-                                        setShowAppDrawer(false); 
-                                    }}
-                                    className="flex flex-col items-center gap-3 group transition-transform hover:scale-105"
-                                >
-                                    <div 
-                                      className={`w-16 h-16 rounded-2xl flex items-center justify-center transition-all shadow-lg ${isActive ? 'bg-white' : 'bg-white/10 text-white group-hover:bg-white/20'}`}
-                                      style={isActive ? { color: BRAND_PRIMARY } : {}}
-                                    >
-                                        <Icon size={32} />
-                                    </div>
-                                    <span className="text-white font-medium text-sm tracking-wide">{item.label}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-            )}
-
             {/* Main Content Area */}
-            <main className="flex-1 overflow-auto relative bg-white">
+            <main className="flex-1 overflow-auto relative">
                 {children || <Outlet />}
             </main>
         </div>
