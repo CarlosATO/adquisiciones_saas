@@ -82,12 +82,18 @@ export default function MainLayout({ children }) {
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
             setUserName(user.email.split('@')[0].toUpperCase());
-            const { data, error } = await supabase.from('company_users')
-                .select('role, module_roles, companies(name)').eq('user_id', user.id).single();
-            if (error) throw error;
-            setUserRole(data.role);
-            setModuleRoles(data.module_roles || {});
-            setCompanyName(data.companies.name.replace(/Almacen/i, "Adquisiciones"));
+
+            // 🔥 NUEVA ARQUITECTURA: Extraemos Rol y ID directamente del JWT
+            const role = user.app_metadata?.role || 'MEMBER';
+            const companyId = user.app_metadata?.company_id;
+            
+            setUserRole(role);
+            setModuleRoles(user.app_metadata?.module_roles || {});
+
+            if (companyId) {
+                const { data: comp } = await supabase.from('companies').select('name').eq('id', companyId).single();
+                if (comp) setCompanyName(comp.name.replace(/Almacen/i, "Adquisiciones"));
+            }
         } catch (err) { console.error(err); } finally { setLoading(false); }
     };
 
