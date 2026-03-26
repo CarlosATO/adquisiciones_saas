@@ -44,15 +44,15 @@ export default function Facturacion() {
       if (!user) return;
       setUserId(user.id);
 
-      const { data: cu } = await supabase
-        .from('company_users').select('company_id').eq('user_id', user.id).single();
-      if (!cu) return;
-      setCompanyId(cu.company_id);
+      // 🔥 NUEVA ARQUITECTURA: Identidad vía JWT
+      const jwtCompanyId = user.app_metadata?.company_id;
+      if (!jwtCompanyId) return;
+      setCompanyId(jwtCompanyId);
 
-      // 1. TODOS los proveedores de la empresa
+      // 1. TODOS los proveedores de la empresa (RLS filtra automáticamente)
       const { data: suppliersData } = await supabase
         .from('suppliers').select('id, business_name, name')
-        .eq('company_id', cu.company_id).order('business_name');
+        .order('business_name');
       setAllSuppliers(suppliersData || []);
       const supplierMap = Object.fromEntries((suppliersData || []).map(s => [s.id, s]));
 
@@ -61,7 +61,6 @@ export default function Facturacion() {
       const { data: orders } = await supabase
         .from('purchase_orders')
         .select('id, po_number, status, billing_status, supplier_id')
-        .eq('company_id', cu.company_id)
         .in('status', ['PARTIAL', 'RECEIVED']);
 
       if (orders?.length) {
@@ -110,7 +109,6 @@ export default function Facturacion() {
       const { data: logExpenses, error: logErr } = await supabase
         .from('expenses')
         .select('id, internal_id, supplier_id, document_number, amount, expense_date, due_date, description, status, created_at')
-        .eq('company_id', cu.company_id)
         .like('internal_id', 'LOG-%')
         .gt('amount', 0)
         .order('created_at', { ascending: false });
@@ -153,7 +151,6 @@ export default function Facturacion() {
     try {
       if (modalMode === 'register') {
         const { error: expErr } = await supabase.from('expenses').insert([{
-          company_id:    companyId,
           user_id:       userId,
           category:      'OTROS',
           amount:        selectedReceipt.amount,
@@ -199,11 +196,10 @@ export default function Facturacion() {
     if (!logFormData.amount || isNaN(Number(logFormData.amount))) return alert('Ingrese un monto válido.');
     setSaving(true);
     try {
-      // Correlativo por empresa: buscar el mayor número LOG- existente
+      // Correlativo por empresa: buscar el mayor número LOG- existente (RLS filtra automáticamente)
       const { data: existing } = await supabase
         .from('expenses')
         .select('internal_id')
-        .eq('company_id', companyId)
         .like('internal_id', 'LOG-%');
       const maxNum = (existing || []).reduce((max, e) => {
         const n = parseInt((e.internal_id || '').replace('LOG-', ''), 10);
@@ -212,7 +208,6 @@ export default function Facturacion() {
       const internalId = 'LOG-' + String(maxNum + 1).padStart(4, '0');
       const supplier   = allSuppliers.find(s => s.id === logFormData.supplier_id);
       const newExp = {
-        company_id:      companyId,
         user_id:         userId,
         category:        'OTROS',
         internal_id:     internalId,

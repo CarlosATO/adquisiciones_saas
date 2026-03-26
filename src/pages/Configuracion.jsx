@@ -32,23 +32,29 @@ export default function Configuracion() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { navigate('/'); return; }
 
+      // 🔥 NUEVA ARQUITECTURA: Identidad vía JWT
+      const jwtCompanyId = user.app_metadata?.company_id;
+      const jwtRole      = user.app_metadata?.role; // Asumiendo que el trigger inyecta el rol o lo sacamos de la tabla
+
+      if (!jwtCompanyId) { navigate('/'); return; }
+      setCompanyId(jwtCompanyId);
+
+      // Verificamos el rol desde la tabla (para mayor seguridad en UI)
       const { data: cu } = await supabase
         .from('company_users')
-        .select('company_id, role')
-        .eq('user_id', user.id).single();
+        .select('role')
+        .eq('user_id', user.id)
+        .eq('company_id', jwtCompanyId)
+        .single();
+      
+      if (!cu || cu.role !== 'OWNER') { navigate('/'); return; }
 
-      if (!cu) { navigate('/'); return; }
-
-      // Solo OWNER puede ver configuración
-      if (cu.role !== 'OWNER') { navigate('/'); return; }
-
-      setCompanyId(cu.company_id);
       setIsOwner(true);
 
       const { data: co } = await supabase
         .from('companies')
         .select('name, legal_name, rut, address, city, phone, po_approval_threshold')
-        .eq('id', cu.company_id).single();
+        .single(); // RLS filtrará automáticamente por el ID de la empresa del usuario
 
       if (co) {
         setCompanyInfo({
@@ -83,7 +89,7 @@ export default function Configuracion() {
       const { error } = await supabase
         .from('companies')
         .update({ po_approval_threshold: val })
-        .eq('id', companyId);
+        .eq('id', companyId); // Mantenemos el ID por ser Primary Key del Update
       if (error) throw error;
       setOriginalThreshold(String(val));
       setThresholdDirty(false);

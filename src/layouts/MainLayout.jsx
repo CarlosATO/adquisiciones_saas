@@ -28,46 +28,29 @@ const buildRibbonTabs = (userRole, moduleRoles) => {
     const tabs = [];
     
     // Module 1: Inicio / Dashboard
-    if (isManager) {
-        tabs.push({
-            id: 'inicio',
-            label: 'Inicio',
-            icon: LayoutDashboard,
-            items: [
-                { to: '/dashboard-compras', label: 'Tablero', icon: LayoutDashboard },
-            ],
-        });
-    }
+    // Persistente para todos los usuarios autenticados
+    tabs.push({
+        id: 'inicio',
+        label: 'Inicio',
+        icon: LayoutDashboard,
+        items: [
+            { to: '/dashboard-compras', label: 'Tablero', icon: LayoutDashboard },
+        ],
+    });
 
     // Module 2: Adquisiciones (Local)
-    if (isManager || userRole === 'PURCHASER') {
-        const items = [
-            { to: '/productos', label: 'Productos', icon: Package },
-            { to: '/proveedores', label: 'Proveedores', icon: Users },
-            { to: '/ordenes', label: 'Órdenes de Compra', icon: ClipboardList },
-            { to: '/recepcion', label: 'Recepción', icon: PackageCheck },
-            { to: '/costos-destino', label: 'Costos en Destino', icon: Anchor },
-            { to: '/facturacion',      label: 'Facturación',      icon: Receipt },
-            { to: '/cuentas-por-pagar', label: 'Cuentas por Pagar', icon: CreditCard },
-        ];
-        // Solo MANAGER / OWNER ven la bandeja de aprobaciones
-        if (isManager) {
-            items.splice(3, 0, { to: '/aprobaciones', label: 'Aprobaciones', icon: CheckSquare });
-        }
-        tabs.push({ id: 'adquisiciones', label: 'Adquisiciones', icon: Truck, items });
-    }
-
-    // Module 3: Configuración (solo OWNER)
-    if (userRole === 'OWNER') {
-        tabs.push({
-            id: 'configuracion',
-            label: 'Configuración',
-            icon: Settings,
-            items: [
-                { to: '/configuracion', label: 'Configuración', icon: Settings },
-            ],
-        });
-    }
+    // Sin discriminación de roles en este módulo
+    const items = [
+        { to: '/productos', label: 'Productos', icon: Package },
+        { to: '/proveedores', label: 'Proveedores', icon: Users },
+        { to: '/ordenes', label: 'Órdenes de Compra', icon: ClipboardList },
+        { to: '/aprobaciones', label: 'Aprobaciones', icon: CheckSquare },
+        { to: '/recepcion', label: 'Recepción', icon: PackageCheck },
+        { to: '/costos-destino', label: 'Costos en Destino', icon: Anchor },
+        { to: '/facturacion',      label: 'Facturación',      icon: Receipt },
+        { to: '/cuentas-por-pagar', label: 'Cuentas por Pagar', icon: CreditCard },
+    ];
+    tabs.push({ id: 'adquisiciones', label: 'Adquisiciones', icon: Truck, items });
 
     return tabs;
 };
@@ -179,7 +162,14 @@ export default function MainLayout({ children }) {
                                 </div>
                                 <div className="py-1">
                                     <button 
-                                        onClick={() => window.location.href = 'http://localhost:3000/portal'} 
+                                        onClick={async () => {
+                                            const { data: { session } } = await supabase.auth.getSession();
+                                            if (session) {
+                                                window.location.href = `http://localhost:3000/portal#access_token=${session.access_token}&refresh_token=${session.refresh_token}`;
+                                            } else {
+                                                window.location.href = 'http://localhost:3000/login';
+                                            }
+                                        }} 
                                         className="w-full text-left px-4 py-2.5 hover:bg-white/10 flex items-center gap-3 text-xs transition-colors"
                                     >
                                         <LogOut size={14} className="opacity-70" /> 

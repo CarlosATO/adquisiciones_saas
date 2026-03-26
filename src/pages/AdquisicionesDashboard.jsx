@@ -35,10 +35,12 @@ export default function AdquisicionesDashboard() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: cu } = await supabase
-        .from('company_users').select('company_id').eq('user_id', user.id).single();
-      if (!cu) return;
-      const companyId = cu.company_id;
+      // 🔥 NUEVA ARQUITECTURA: Acceso directo vía JWT (Aprobado en Paso 1)
+      const companyId = user.app_metadata?.company_id;
+      if (!companyId) {
+        console.error("No se detectó company_id en el token.");
+        return;
+      }
 
       const now      = new Date();
       const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];

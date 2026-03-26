@@ -37,16 +37,15 @@ export default function CuentasPorPagar() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: cu } = await supabase
-        .from('company_users').select('company_id').eq('user_id', user.id).single();
-      if (!cu) return;
-      setCompanyId(cu.company_id);
+      // 🔥 NUEVA ARQUITECTURA: Identidad vía JWT
+      const jwtCompanyId = user.app_metadata?.company_id;
+      if (!jwtCompanyId) return;
+      setCompanyId(jwtCompanyId);
 
-      // 1. Órdenes de compra recibidas (tienen facturas)
+      // 1. Órdenes de compra recibidas (tienen facturas) - RLS filtra por empresa
       const { data: orders, error: oErr } = await supabase
         .from('purchase_orders')
         .select('id, po_number, status, issue_date, supplier_id, suppliers(id, business_name, name)')
-        .eq('company_id', cu.company_id)
         .in('status', ['PARTIAL', 'RECEIVED'])
         .order('po_number', { ascending: false });
 
@@ -133,11 +132,10 @@ export default function CuentasPorPagar() {
         }).filter(po => po.invoices.length > 0);
       }
 
-      // 6. Facturas Logísticas (LOG-)
+      // 6. Facturas Logísticas (LOG-) - RLS filtra automáticamente
       const { data: logExpenses, error: logErr } = await supabase
         .from('expenses')
         .select('id, internal_id, supplier_id, document_number, amount, paid_amount, status, expense_date, due_date, description, created_at')
-        .eq('company_id', cu.company_id)
         .like('internal_id', 'LOG-%')
         .gt('amount', 0)
         .order('created_at', { ascending: false });

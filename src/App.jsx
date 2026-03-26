@@ -6,10 +6,9 @@ const PrivateRoute = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
   
-  const [isProcessingToken, setIsProcessingToken] = useState(
-    window.location.hash.includes('access_token')
-  );
+  const isProcessingToken = window.location.hash.includes('access_token');
   const hasProcessed = useRef(false);
+  const hasAttemptedRefresh = useRef(false); // 🔥 Guard para evitar loop de refresh
 
   useEffect(() => {
     const processToken = async () => {
@@ -22,16 +21,13 @@ const PrivateRoute = ({ children }) => {
           const refresh_token = params.get('refresh_token');
 
           if (access_token && refresh_token) {
-            // Limpiamos el hash inmediatamente para evitar re-procesamiento
             window.history.replaceState(null, '', window.location.pathname + window.location.search);
-            
             const { error } = await supabase.auth.setSession({ access_token, refresh_token });
             if (error) throw error;
           }
         } catch (err) {
           console.error("Error en SSO:", err);
         } finally {
-          setIsProcessingToken(false);
           checkAuth();
         }
       } else if (!isProcessingToken) {
@@ -39,11 +35,22 @@ const PrivateRoute = ({ children }) => {
       }
     };
     processToken();
-  }, [isProcessingToken]);
+  }, []); // Solo al montar
 
   const checkAuth = async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    setSession(session);
+    
+    // 🔥 NUEVA ARQUITECTURA: Verificamos si el JWT tiene el tenant_id
+    // Guardamos con hasAttemptedRefresh para evitar loop si el usuario no tiene empresa asignada
+    if (session && !session.user.app_metadata?.company_id && !hasAttemptedRefresh.current) {
+      hasAttemptedRefresh.current = true;
+      console.log("Token sin company_id, intentando refrescar una vez...");
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      setSession(refreshed.session);
+    } else {
+      setSession(session);
+    }
+    
     setLoading(false);
   };
 

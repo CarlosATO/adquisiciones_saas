@@ -46,18 +46,13 @@ export default function Proveedores() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: companyUser } = await supabase
-        .from('company_users')
-        .select('company_id')
-        .eq('user_id', user.id)
-        .single();
-
-      if (companyUser) setCompanyId(companyUser.company_id);
+      // 🔥 NUEVA ARQUITECTURA: Identidad vía JWT
+      const jwtCompanyId = user.app_metadata?.company_id;
+      if (jwtCompanyId) setCompanyId(jwtCompanyId);
 
       const { data: suppliersData, error } = await supabase
         .from('suppliers')
         .select('*')
-        .eq('company_id', companyUser.company_id)
         .order('name', { ascending: true });
 
       if (!error && suppliersData) setSuppliers(suppliersData);
@@ -114,7 +109,7 @@ export default function Proveedores() {
     setSaving(true);
 
     try {
-      const payload = { ...formData, company_id: companyId };
+      const payload = { ...formData };
       if (editingId) {
         const { error } = await supabase.from('suppliers').update(payload).eq('id', editingId);
         if (error) throw error;

@@ -116,7 +116,8 @@ function CategorySelector({ companyId, value, onChange }) {
   }, [companyId]);
 
   const fetchCategories = async () => {
-    const { data } = await supabase.from('product_categories').select('*').eq('company_id', companyId).order('name');
+    // 🔥 NUEVA ARQUITECTURA: RLS filtra automáticamente por empresa del JWT
+    const { data } = await supabase.from('product_categories').select('*').order('name');
     if (data) setCategories(data);
   };
 
@@ -135,7 +136,7 @@ function CategorySelector({ companyId, value, onChange }) {
 
       const { data, error } = await supabase
         .from('product_categories')
-        .insert([{ name: upperName, company_id: companyId }])
+        .insert([{ name: upperName }])
         .select()
         .single();
       
@@ -234,26 +235,19 @@ export default function Productos() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const { data: companyUser } = await supabase
-        .from('company_users')
-        .select('company_id')
-        .eq('user_id', user.id)
-        .single();
+      // 🔥 NUEVA ARQUITECTURA: Identidad vía JWT
+      const jwtCompanyId = user.app_metadata?.company_id;
+      if (jwtCompanyId) setCompanyId(jwtCompanyId);
 
-      if (companyUser && companyUser.company_id) {
-        setCompanyId(companyUser.company_id);
-        
-        const { data: productsData, error } = await supabase
-          .from('products')
-          .select('*, product_categories(name)')
-          .eq('company_id', companyUser.company_id)
-          .order('name', { ascending: true });
+      const { data: productsData, error } = await supabase
+        .from('products')
+        .select('*, product_categories(name)')
+        .order('name', { ascending: true });
 
-        if (!error && productsData) {
-          setProducts(productsData);
-        } else {
-          setProducts([]);
-        }
+      if (!error && productsData) {
+        setProducts(productsData);
+      } else {
+        setProducts([]);
       }
     } catch (error) {
       console.error('Error:', error);
@@ -323,7 +317,7 @@ export default function Productos() {
 
     setSaving(true);
     try {
-      const payload = { ...formData, name: upperName, company_id: companyId };
+      const payload = { ...formData, name: upperName };
       if (editingId) {
         const { error } = await supabase.from('products').update(payload).eq('id', editingId);
         if (error) throw error;

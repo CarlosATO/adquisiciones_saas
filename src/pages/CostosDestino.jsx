@@ -33,16 +33,15 @@ export default function CostosDestino() {
       if (!user) return;
       setUserId(user.id);
 
-      const { data: cu } = await supabase
-        .from('company_users').select('company_id').eq('user_id', user.id).single();
-      if (!cu) return;
-      setCompanyId(cu.company_id);
+      // 🔥 NUEVA ARQUITECTURA: Identidad vía JWT
+      const jwtCompanyId = user.app_metadata?.company_id;
+      if (!jwtCompanyId) return;
+      setCompanyId(jwtCompanyId);
 
-      // 1. Facturas LOG- con su asignación acumulada
+      // 1. Facturas LOG- con su asignación acumulada (RLS filtra automáticamente)
       const { data: expenses } = await supabase
         .from('expenses')
         .select('id, internal_id, supplier_id, document_number, amount, expense_date, description, suppliers(business_name, name)')
-        .eq('company_id', cu.company_id)
         .like('internal_id', 'LOG-%')
         .gt('amount', 0)
         .order('internal_id', { ascending: false });
@@ -50,8 +49,7 @@ export default function CostosDestino() {
       // Suma ya asignada por expense
       const { data: allocations } = await supabase
         .from('landed_cost_allocations')
-        .select('expense_id, allocated_amount')
-        .eq('company_id', cu.company_id);
+        .select('expense_id, allocated_amount');
 
       const allocMap = {};
       (allocations || []).forEach(a => {
@@ -74,7 +72,6 @@ export default function CostosDestino() {
           id, document_type, document_number, created_at, po_id,
           purchase_orders(po_number, supplier_id, suppliers(business_name, name))
         `)
-        .eq('company_id', cu.company_id)
         .eq('status', 'DONE')
         .order('created_at', { ascending: false });
 
@@ -192,7 +189,6 @@ export default function CostosDestino() {
             : 0;
           if (invShare <= 0) continue;
           const { error: lcaErr } = await supabase.from('landed_cost_allocations').insert([{
-            company_id:       companyId,
             expense_id:       inv.id,
             receipt_id:       receipt.id,
             allocated_amount: invShare,

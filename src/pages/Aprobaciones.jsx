@@ -25,20 +25,26 @@ export default function Aprobaciones() {
       if (!user) { navigate('/'); return; }
       setUserId(user.id);
 
+      // 🔥 NUEVA ARQUITECTURA: Identidad vía JWT
+      const jwtCompanyId = user.app_metadata?.company_id;
+      if (!jwtCompanyId) { navigate('/'); return; }
+      setCompanyId(jwtCompanyId);
+
       const { data: cu } = await supabase
         .from('company_users')
-        .select('company_id, role, module_roles')
-        .eq('user_id', user.id).single();
+        .select('role, module_roles')
+        .eq('user_id', user.id)
+        .eq('company_id', jwtCompanyId)
+        .single();
 
       if (!cu) { navigate('/'); return; }
-      setCompanyId(cu.company_id);
 
       const manager = cu.role === 'OWNER' || cu.role === 'MANAGER' || cu.module_roles?.ADQUISICIONES === 'MANAGER';
       setIsManager(manager);
 
       if (!manager) { navigate('/'); return; }
 
-      await fetchOrders(cu.company_id);
+      await fetchOrders();
     } catch (err) {
       console.error(err);
       navigate('/');
@@ -47,11 +53,11 @@ export default function Aprobaciones() {
     }
   };
 
-  const fetchOrders = async (cid) => {
+  const fetchOrders = async () => {
+    // 🔥 NUEVA ARQUITECTURA: RLS filtra automáticamente por empresa
     const { data, error } = await supabase
       .from('purchase_orders')
       .select('id, po_number, issue_date, total_amount, created_at, suppliers(id, business_name, name)')
-      .eq('company_id', cid)
       .eq('status', 'WAITING_APPROVAL')
       .order('created_at', { ascending: true });
 

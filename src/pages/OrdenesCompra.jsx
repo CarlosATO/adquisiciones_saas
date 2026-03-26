@@ -166,25 +166,27 @@ export default function OrdenesCompra() {
       if (!user) return;
       setUserId(user.id);
 
-      const { data: companyUser } = await supabase.from('company_users').select('company_id, full_name').eq('user_id', user.id).single();
-      if (!companyUser) return;
-      setCompanyId(companyUser.company_id);
-      setUserName(companyUser.full_name || '');
+      // 🔥 NUEVA ARQUITECTURA: Identidad vía JWT
+      const jwtCompanyId = user.app_metadata?.company_id;
+      if (!jwtCompanyId) return;
+      setCompanyId(jwtCompanyId);
 
-      const { data: compInfo } = await supabase.from('companies').select('name').eq('id', companyUser.company_id).single();
+      const { data: companyUser } = await supabase.from('company_users').select('full_name').eq('user_id', user.id).eq('company_id', jwtCompanyId).single();
+      if (companyUser) setUserName(companyUser.full_name || '');
+
+      const { data: compInfo } = await supabase.from('companies').select('name').single();
       if (compInfo) setCompanyName(compInfo.name || '');
 
       if (view === 'list') {
         const { data: ordersData } = await supabase
           .from('purchase_orders')
           .select('*, suppliers(business_name, name, email, contact_person), purchase_order_items(unit_cost, received_quantity)')
-          .eq('company_id', companyUser.company_id)
           .order('created_at', { ascending: false });
         if (ordersData) setOrders(ordersData);
       } else {
-        const { data: supData } = await supabase.from('suppliers').select('id, business_name, name').eq('company_id', companyUser.company_id);
+        const { data: supData } = await supabase.from('suppliers').select('id, business_name, name');
         if (supData) setSuppliers(supData);
-        const { data: prodData } = await supabase.from('products').select('id, name, barcode, cost_price').eq('company_id', companyUser.company_id).order('name');
+        const { data: prodData } = await supabase.from('products').select('id, name, barcode, cost_price').order('name');
         if (prodData) setProducts(prodData);
       }
     } catch (error) {
@@ -313,9 +315,8 @@ export default function OrdenesCompra() {
     if (!selectedOrder) return;
     setSaving(true);
     try {
-      // Obtener umbral de aprobación de la empresa
-      const { data: co } = await supabase
-        .from('companies').select('po_approval_threshold').eq('id', companyId).single();
+      // Obtener umbral de aprobación de la empresa (RLS filtra automáticamente)
+      const { data: co } = await supabase.from('companies').select('po_approval_threshold').single();
       const threshold  = Number(co?.po_approval_threshold || 0);
       const orderTotal = Number(selectedOrder.total_amount || 0);
       const nextStatus = threshold > 0 && orderTotal >= threshold ? 'WAITING_APPROVAL' : 'PENDING';
@@ -381,11 +382,10 @@ export default function OrdenesCompra() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       
-      // 1. Crear documento de recepción
+      // 1. Crear documento de recepción (company_id automático via RLS)
       const { data: receipt, error: receiptErr } = await supabase
         .from('inventory_receipts')
         .insert([{
-          company_id: companyId,
           po_id: selectedOrder.id,
           supplier_id: selectedOrder.supplier_id,
           document_type: receiptData.document_type,
@@ -402,11 +402,10 @@ export default function OrdenesCompra() {
       for (const line of receivingLines) {
         if (Number(line.received_now) <= 0) continue;
 
-        // 2. Crear movimiento de stock
+        // 2. Crear movimiento de stock (company_id automático)
         const { error: moveErr } = await supabase
           .from('inventory_movements')
           .insert([{
-            company_id: companyId,
             product_id: line.product_id,
             user_id: user.id,
             movement_type: 'IN',
@@ -465,17 +464,16 @@ export default function OrdenesCompra() {
         const { error: expErr } = await supabase
           .from('expenses')
           .insert([{
-            company_id: companyId,
-            user_id: user.id,
-            category: 'OTROS',
-            amount: receivedTotal,
-            description: `FACTURA ${receiptData.document_number} - ${selectedOrder.suppliers?.business_name || selectedOrder.suppliers?.name}`,
-            expense_date: new Date().toISOString().split('T')[0],
-            po_id: selectedOrder.id,
-            receipt_id: receipt.id,
-            supplier_id: selectedOrder.supplier_id,
+            user_id:         user.id,
+            category:        'OTROS',
+            amount:          receivedTotal,
+            description:     `FACTURA ${receiptData.document_number} - ${selectedOrder.suppliers?.business_name || selectedOrder.suppliers?.name}`,
+            expense_date:    new Date().toISOString().split('T')[0],
+            po_id:           selectedOrder.id,
+            receipt_id:      receipt.id,
+            supplier_id:     selectedOrder.supplier_id,
             document_number: receiptData.document_number,
-            status: 'PENDING_PAYMENT',
+            status:          'PENDING_PAYMENT',
           }]);
 
         if (!expErr) {
@@ -525,11 +523,10 @@ export default function OrdenesCompra() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
 
-      // 1. Cabecera de devolución en inventory_receipts
+      // 1. Cabecera de devolución en inventory_receipts (company_id automático)
       const { data: returnReceipt, error: receiptErr } = await supabase
         .from('inventory_receipts')
         .insert([{
-          company_id: companyId,
           po_id: selectedOrder.id,
           supplier_id: selectedOrder.supplier_id,
           document_type: returnData.document_type,
@@ -543,11 +540,10 @@ export default function OrdenesCompra() {
       if (receiptErr) throw receiptErr;
 
       for (const line of itemsToReturn) {
-        // 2. Movimiento Kardex (OUT)
+        // 2. Movimiento Kardex (OUT) (company_id automático)
         const { error: moveErr } = await supabase
           .from('inventory_movements')
           .insert([{
-            company_id: companyId,
             product_id: line.product_id,
             user_id: user.id,
             movement_type: 'OUT',
@@ -602,17 +598,16 @@ export default function OrdenesCompra() {
         const { error: expErr } = await supabase
           .from('expenses')
           .insert([{
-            company_id: companyId,
-            user_id: user.id,
-            category: 'OTROS',
-            amount: -returnedTotal,
-            description: `${returnData.document_type} ${returnData.document_number} - Dev. OC #${selectedOrder.po_number} - ${selectedOrder.suppliers?.business_name || selectedOrder.suppliers?.name}`,
-            expense_date: new Date().toISOString().split('T')[0],
-            po_id: selectedOrder.id,
-            receipt_id: returnReceipt.id,
-            supplier_id: selectedOrder.supplier_id,
+            user_id:         user.id,
+            category:        'OTROS',
+            amount:          -returnedTotal,
+            description:     `${returnData.document_type} ${returnData.document_number} - Dev. OC #${selectedOrder.po_number} - ${selectedOrder.suppliers?.business_name || selectedOrder.suppliers?.name}`,
+            expense_date:    new Date().toISOString().split('T')[0],
+            po_id:           selectedOrder.id,
+            receipt_id:      returnReceipt.id,
+            supplier_id:     selectedOrder.supplier_id,
             document_number: returnData.document_number,
-            status: 'PENDING_PAYMENT',
+            status:          'PENDING_PAYMENT',
           }]);
         if (expErr) throw new Error('No se pudo registrar nota de crédito: ' + expErr.message);
       }
@@ -656,7 +651,6 @@ export default function OrdenesCompra() {
     try {
       const amount = calcReceiptAmount(invoiceSelectedReceipt);
       const { error: expErr } = await supabase.from('expenses').insert([{
-        company_id:      companyId,
         user_id:         userId,
         category:        'OTROS',
         amount:          amount,
@@ -710,7 +704,6 @@ export default function OrdenesCompra() {
       const { data: newOrder, error: orderError } = await supabase
         .from('purchase_orders')
         .insert([{
-          company_id: companyId,
           supplier_id: selectedSupplier,
           created_by: userId,
           status: finalStatus,
